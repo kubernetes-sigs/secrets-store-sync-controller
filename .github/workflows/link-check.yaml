@@ -1,0 +1,36 @@
+name: Check links
+
+on:
+  push:
+    paths:
+      - "**.md"
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+    paths:
+    - "**.md"
+  schedule:
+    - cron: "0 9 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Harden Runner
+      uses: step-security/harden-runner@eb238b55efaa70779f274895e782ed17c84f2895 # v2.6.1
+      with:
+        egress-policy: audit
+    - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.0.0
+    - name: linkspector
+      uses: umbrelladocs/action-linkspector@7fbf24c6adceef216c594da7aa370c575aafcff1 # v1.0.0
+
+      with:
+        reporter: github-pr-review
+        fail_on_error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
