@@ -6,8 +6,8 @@ metadata:
     app.kubernetes.io/name: role
     app.kubernetes.io/instance: leader-election-role
     app.kubernetes.io/component: rbac
-    app.kubernetes.io/created-by: secret-sync-controller
-    app.kubernetes.io/part-of: secret-sync-controller
+    app.kubernetes.io/created-by: secrets-store-sync-controller
+    app.kubernetes.io/part-of: secrets-store-sync-controller
     app.kubernetes.io/managed-by: kustomize
   name: leader-election-role
 rules:

@@ -23,14 +23,14 @@
 apiVersion: admissionregistration.k8s.io/v1beta1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: "secret-sync-controller-update-owners-check-oldobject-policy"
+  name: "secrets-store-sync-controller-update-owners-check-oldobject-policy"
 spec:
   failurePolicy: Fail
   paramKind:
     apiVersion: v1
     kind: ConfigMap 
   matchConditions:
-    - name: 'user-is-secret-sync-controller'
+    - name: 'user-is-secrets-store-sync-controller'
       expression: "request.userInfo.username == 'system:serviceaccount:'+params.data.controllerNamespace+':'+params.data.controllerName" #'system:serviceaccount:'+params.data.controllerNamespace+':'+params.data.controllerName
   matchConstraints:
     resourceRules:
