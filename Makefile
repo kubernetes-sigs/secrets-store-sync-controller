@@ -10,11 +10,24 @@ GO_FILES=$(shell go list ./... | grep -v /test/sanity)
 TOOLS_MOD_DIR := ./hack/tools
 TOOLS_DIR := $(abspath ./hack/tools)
 TOOLS_BIN_DIR := $(TOOLS_DIR)/bin
+GOARCH  := $(shell go env GOARCH)
+GOOS    := $(shell go env GOOS)
+GOPROXY := $(shell go env GOPROXY)
+ORG_PATH=sigs.k8s.io
+PROJECT_NAME := secrets-store-sync-controller
+BUILD_COMMIT := $(shell git rev-parse --short HEAD)
+REPO_PATH=$(ORG_PATH)/$(PROJECT_NAME)
+BUILD_TIMESTAMP := $$(date +%Y-%m-%d-%H:%M)
+BUILD_TIME_VAR := $(REPO_PATH)/pkg/version.BuildTime
+BUILD_VERSION_VAR := $(REPO_PATH)/pkg/version.BuildVersion
+VCS_VAR := $(REPO_PATH)/pkg/version.Vcs
+LDFLAGS ?= "-X $(BUILD_TIME_VAR)=$(BUILD_TIMESTAMP) -X $(BUILD_VERSION_VAR)=$(VERSION) -X $(VCS_VAR)=$(BUILD_COMMIT)"
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v4.5.7
-CONTROLLER_TOOLS_VERSION ?= v0.11.1
-KIND_NODE_IMAGE_VERSION ?= v1.29.2
+CONTROLLER_TOOLS_VERSION ?= v0.15.0
+KIND_NODE_IMAGE_VERSION ?= v1.30.0
+TRIVY_VERSION ?=  0.52.2
 
 ## Tool Binaries
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
@@ -22,12 +35,13 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT := $(TOOLS_BIN_DIR)/golangci-lint
 HELM := helm
+TRIVY := trivy
 
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.26.0
 
 # Image URL to use all building/pushing image targets
-IMAGE_NAME ?= secrets-sync-controller
+IMAGE_NAME ?= secrets-store-sync-controller
 IMG ?= $(IMAGE_NAME):$(VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
@@ -88,18 +102,18 @@ test: manifests generate fmt vet envtest ## Run tests.
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager main.go
+	go build -o bin/manager cmd/main.go
 
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./main.go
+	go run ./cmd/main.go
 
 # If you wish built the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64 ). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
-	docker build -t ${IMG} -f ./docker/Dockerfile .
+	docker build --build-arg LDFLAGS=$(LDFLAGS) -t ${IMG} -f ./docker/Dockerfile .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -111,7 +125,7 @@ docker-push: ## Push docker image with the manager.
 # - have enable BuildKit, More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # - be able to push the image for your registry (i.e. if you do not inform a valid value via IMG=<myregistry/image:<tag>> then the export will fail)
 # To properly provided solutions that supports more than one platform you should use this option.
-PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
+PLATFORMS ?= linux/arm64,linux/amd64
 .PHONY: docker-buildx
 docker-buildx: test ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
@@ -200,17 +214,13 @@ local-setup: docker-build ## setup and run sync controller locally
 	kind create cluster --name sync-controller --image kindest/node:$(KIND_NODE_IMAGE_VERSION) --config=./hack/localsetup/kind-config.yaml
 	kind load docker-image --name sync-controller $(IMG)
 
-	cp manifest_staging/charts/secretsync/values.yaml manifest_staging/charts/secretsync/temp_values.yaml
-	sed -i '' '/providerContainer:/,/providervol:/s/^#//g' manifest_staging/charts/secretsync/temp_values.yaml
-	helm install secrets-sync-controller -f manifest_staging/charts/secretsync/temp_values.yaml manifest_staging/charts/secretsync
-	rm -f manifest_staging/charts/secretsync/temp_values.yaml
+	cp manifest_staging/charts/secrets-store-sync-controller/values.yaml manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
+	sed -i '' '/providerContainer:/,/providervol:/s/^#//g' manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
+	helm install secrets-store-sync-controller -f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml manifest_staging/charts/secrets-store-sync-controller
+	rm -f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
 
 	kubectl apply -f ./hack/localsetup/e2e-providerspc.yaml
 	kubectl apply -f ./hack/localsetup/e2e-secret-sync.yaml
-
-.PHONY: go-test # Run unit tests
-go-test:
-	go test -count=1 $(GO_FILES) -v -coverprofile cover.out
 
 ## --------------------------------------
 ## Testing Binaries
@@ -218,6 +228,24 @@ go-test:
 
 $(HELM): ## Install helm3 if not present
 	helm version --short | grep -q v3 || (curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash)
+
+$(TRIVY): ## Install trivy for image vulnerability scan
+	trivy -v | grep -q $(TRIVY_VERSION) || (curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v$(TRIVY_VERSION))
+
+## --------------------------------------
+## Testing
+## --------------------------------------
+
+.PHONY: go-test # Run unit tests
+go-test:
+	go test -count=1 $(GO_FILES) -v -coverprofile cover.out
+
+.PHONY: image-scan
+image-scan: $(TRIVY)
+	# show all vulnerabilities
+	$(TRIVY) image --severity MEDIUM,HIGH,CRITICAL $(IMG)
+	# show vulnerabilities that have been fixed
+	$(TRIVY) image --exit-code 1 --ignore-unfixed --severity MEDIUM,HIGH,CRITICAL $(IMG)
 
 ## --------------------------------------
 ## Linting
@@ -235,4 +263,5 @@ lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run --timeout=5m -v
 
 lint-charts: $(HELM) # Run helm lint tests
-	helm lint manifest_staging/charts/secretsync
+	# ToDO: Add helm lint for 'charts' dir once released first version
+	$(HELM) lint manifest_staging/charts/secrets-store-sync-controller

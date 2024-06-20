@@ -1,7 +1,22 @@
+# Copyright 2024 The Kubernetes Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Build the manager binary
-FROM golang:1.22@sha256:ab48cd7b8e2cffb6fa1199de232f61c76d3c33dc158be8a998c5407a8e5eb583 as builder
+FROM golang:1.22@sha256:a66eda637829ce891e9cf61ff1ee0edf544e1f6c5b0e666c7310dce231a66f28 as builder
 ARG TARGETOS
 ARG TARGETARCH
+ARG LDFLAGS
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -12,23 +27,25 @@ COPY ../go.sum go.sum
 RUN go mod download
 
 # Copy the go source
-COPY ../main.go main.go
+COPY ../cmd/main.go cmd/main.go
 COPY ../api api/
-COPY ../controllers controllers/
+COPY ../internal/controller internal/controller/
 COPY ../pkg pkg/
 
 # Build
-# the GOARCH has not a default value to allow the binary be built according to the host where the command
-# was called. For example, if we call make docker-build in a local env which has the Apple Silicon M1 SO
-# the docker BUILDPLATFORM arg will be linux/arm64 when for Apple x86 it will be linux/amd64. Therefore,
-# by leaving it empty we can ensure that the container and binary shipped on it will have the same platform.
-# TODO: LDFLAGS
-RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -a -o manager main.go
+# The GOARCH does not have a default value to allow the binary to be built according to the host where the command was
+# called. For example, if we call make docker-build in a local environment with the Apple Silicon, the Docker
+# BUILDPLATFORM argument will be linux/arm64. For Apple x86, it will be linux/amd64. Therefore, by leaving it empty,
+# we can ensure that the container and binary shipped with it will have the same platform.
+RUN CGO_ENABLED=0 \
+    GOOS=${TARGETOS:-linux} \
+    GOARCH=${TARGETARCH} \
+    go build -a -ldflags "${LDFLAGS}" -o secrets-store-sync-controller cmd/main.go
 
 # Use distroless as minimal base image to package the manager binary
 # Refer to https://github.com/GoogleContainerTools/distroless for more details
 FROM gcr.io/distroless/static:latest
 WORKDIR /
-COPY --from=builder /workspace/manager .
+COPY --from=builder /workspace/secrets-store-sync-controller .
 
-ENTRYPOINT ["/manager"]
+ENTRYPOINT ["/secrets-store-sync-controller"]
