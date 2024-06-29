@@ -1,4 +1,4 @@
-# Secret Sync Controller
+# Secrets Store Sync Controller
 
 This is a Kubernetes controller that watches for changes to a custom resource and syncs the secrets from external secrets-store as Kubernetes secret. This feature is useful for syncing secrets across multiple namespaces and making sure that the secrets are available when the cluster is offline.
 
@@ -43,7 +43,7 @@ As the controller is still under development, the helm chart is not available in
    ```shell
    VERSION=e2e make docker-build
    
-   kind load docker-image --name sync-controller secrets-sync-controller:e2e
+   kind load docker-image --name sync-controller secrets-store-sync-controller:e2e
    ```
 
 1. Configure the provider container
@@ -53,7 +53,7 @@ As the controller is still under development, the helm chart is not available in
 1. From the root of the project, run the following command to deploy the controller using Helm:
 
     ```bash
-    helm install secrets-sync-controller -f charts/secretsync/values.yaml charts/secretsync
+    helm install secrets-sync-controller -f manifest_staging/charts/secrets-store-sync-controller/values.yaml manifest_staging/charts/secrets-store-sync-controller
     ```
 
 ### Deploy the SecretProviderClass

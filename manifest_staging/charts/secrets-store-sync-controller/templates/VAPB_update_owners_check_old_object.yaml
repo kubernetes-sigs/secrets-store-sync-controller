@@ -1,0 +1,9 @@
+{{- if .Values.validatingAdmissionPolicies.applyPolicies -}}
+{{ include "secrets-store-sync-controller.admissionApiVersion" . }}
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: "secrets-store-sync-controller-update-owners-check-oldobject-policy-binding"
+spec:
+  policyName: "secrets-store-sync-controller-update-owners-check-oldobject-policy"
+  validationActions: [Deny]
+{{- end -}}
