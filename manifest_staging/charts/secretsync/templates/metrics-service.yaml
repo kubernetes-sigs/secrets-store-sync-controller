@@ -8,7 +8,6 @@ metadata:
     app.kubernetes.io/component: kube-rbac-proxy
     app.kubernetes.io/created-by: secret-sync-controller
     app.kubernetes.io/part-of: secret-sync-controller
-    app.kubernetes.io/managed-by: kustomize
     secrets-store.io/system: "true"
   name: controller-manager-metrics-service
   namespace: {{ .Values.namespace }}
