@@ -236,3 +236,12 @@ lint: $(GOLANGCI_LINT)
 
 lint-charts: $(HELM) # Run helm lint tests
 	helm lint manifest_staging/charts/secretsync
+
+## --------------------------------------
+## E2E Testing
+## --------------------------------------
+
+# Run the e2e provider tests
+.PHONY: run-e2e-provider-tests
+run-e2e-provider-tests: ## Run the e2e provider bats.
+	bats -t -T test/bats/e2e-provider.bats
