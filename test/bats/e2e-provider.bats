@@ -109,14 +109,11 @@ SLEEP_TIME=1
 
   # Delete the SecretSync
   kubectl delete secretsync sse2esecret -n test-v1alpha1
-
+    
   # Check that the secret is deleted
-  cmd="kubectl get secret sse2esecret -n test-v1alpha1"
-  run $cmd
-  assert_failure
+  check_secret_deleted sse2esecret test-v1alpha1
+  assert_success
 }
-
-
 
 teardown_file() {
   if [[ "${INPLACE_UPGRADE_TEST}" != "true" ]]; then
