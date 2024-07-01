@@ -39,6 +39,7 @@ import (
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/controllers"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/metrics"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
 	//+kubebuilder:scaffold:imports
 )
@@ -84,6 +85,12 @@ func runMain() int {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	err := metrics.InitMetricsExporter()
+	if err != nil {
+		setupLog.Error(err, "failed to initialize metrics exporter")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme: scheme,
 		Metrics: server.Options{
@@ -102,6 +109,12 @@ func runMain() int {
 	kubeClient := kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie())
 	tokenClient := k8s.NewTokenClient(kubeClient)
 
+	sr, err := controllers.NewStatsReporter()
+	if err != nil {
+		setupLog.Error(err, "failed to initialize stats reporter")
+		os.Exit(1)
+	}
+
 	providerClients := provider.NewPluginClientBuilder([]string{providerVolumePath}, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxCallRecvMsgSize)))
 	defer providerClients.Cleanup()
 
@@ -119,6 +132,7 @@ func runMain() int {
 		Audiences:            audiences,
 		RotationPollInterval: *rotationPollInterval,
 		EventRecorder:        record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
+		MetricReporter:       sr,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")
 		return 1
