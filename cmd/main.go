@@ -84,7 +84,7 @@ func runMain() error {
 	err := metrics.InitMetricsExporter()
 	if err != nil {
 		setupLog.Error(err, "failed to initialize metrics exporter")
-		os.Exit(1)
+		return 1
 	}
 
 	controllerConfig := ctrl.GetConfigOrDie()
@@ -116,7 +116,7 @@ func runMain() error {
 	sr, err := controller.NewStatsReporter()
 	if err != nil {
 		setupLog.Error(err, "failed to initialize stats reporter")
-		os.Exit(1)
+		return 1
 	}
 
 	defer providerClients.Cleanup()
