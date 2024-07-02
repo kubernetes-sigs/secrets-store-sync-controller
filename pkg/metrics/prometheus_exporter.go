@@ -38,6 +38,8 @@ func initPrometheusExporter() error {
 			metric.Instrument{Kind: metric.InstrumentKindHistogram},
 			metric.Stream{
 				Aggregation: metric.AggregationExplicitBucketHistogram{
+					// Use custom buckets to avoid the default buckets which are too small for our use case.
+					// Start 100ms with last bucket being [~4m, +Inf)
 					Boundaries: crprometheus.ExponentialBucketsRange(0.1, 2, 11),
 				}},
 		)),
