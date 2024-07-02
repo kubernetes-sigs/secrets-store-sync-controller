@@ -17,18 +17,17 @@ limitations under the License.
 package metrics
 
 import (
-	"github.com/prometheus/client_golang/prometheus"
+	crprometheus "github.com/prometheus/client_golang/prometheus"
 	"go.opentelemetry.io/otel"
-	otlp "go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 func initPrometheusExporter() error {
-	exporter, err := otlp.New(
-		otlp.WithRegisterer(metrics.Registry.(*prometheus.Registry)), // using the controller-runtime prometheus metrics registry
+	exporter, err := prometheus.New(
+		prometheus.WithRegisterer(metrics.Registry.(*crprometheus.Registry)), // using the controller-runtime prometheus metrics registry
 	)
-
 	if err != nil {
 		return err
 	}
@@ -39,7 +38,7 @@ func initPrometheusExporter() error {
 			metric.Instrument{Kind: metric.InstrumentKindHistogram},
 			metric.Stream{
 				Aggregation: metric.AggregationExplicitBucketHistogram{
-					Boundaries: prometheus.ExponentialBucketsRange(0.1, 2, 11),
+					Boundaries: crprometheus.ExponentialBucketsRange(0.1, 2, 11),
 				}},
 		)),
 	)
