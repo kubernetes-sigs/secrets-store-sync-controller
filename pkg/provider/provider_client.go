@@ -150,6 +150,7 @@ func (p *PluginClientBuilder) Get(_ context.Context, provider string) (v1alpha1.
 		return nil, fmt.Errorf("%w: provider %q", errProviderNotFound, provider)
 	}
 
+	//nolint:staticcheck
 	conn, err := grpc.Dial(
 		socketPath,
 		p.opts...,
