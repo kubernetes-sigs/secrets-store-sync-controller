@@ -77,7 +77,7 @@ var FailedConditionsTriggeringRetry = []string{
 	ConditionReasonSecretPatchFailedUnknownError,
 	ConditionReasonValidatingAdmissionPolicyCheckFailed,
 	ConditionReasonUserInputValidationFailed,
-	ConditionTypeUnknown}
+}
 
 var SucceededConditionsTriggeringRetry = []string{
 	ConditionReasonCreateSucceeded,

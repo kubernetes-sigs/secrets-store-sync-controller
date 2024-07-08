@@ -114,7 +114,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	ss := &secretsyncv1alpha1.SecretSync{}
 	if err := r.Get(ctx, req.NamespacedName, ss); err != nil {
 		logger.Error(err, "unable to fetch SecretSync")
-		return ctrl.Result{}, client.IgnoreNotFound(err)
+		return ctrl.Result{}, err
 	}
 
 	// update status conditions
