@@ -1,8 +1,6 @@
 module sigs.k8s.io/secrets-store-sync-controller/hack/tools
 
-go 1.22.0
-
-toolchain go1.22.2
+go 1.22
 
 require github.com/golangci/golangci-lint v1.59.0
 
