@@ -50,9 +50,9 @@ podAnnotations:
 podLabels: 
   control-plane: controller-manager
   secrets-store.io/system: "true"
+  app: secrets-store-sync-controller
 
 nodeSelector:
-
 
 tolerations: 
 - operator: Exists

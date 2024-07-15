@@ -32,6 +32,9 @@ LDFLAGS ?= "-X $(BUILD_TIME_VAR)=$(BUILD_TIMESTAMP) -X $(BUILD_VERSION_VAR)=$(VE
 KUSTOMIZE_VERSION ?= v4.5.7
 CONTROLLER_TOOLS_VERSION ?= v0.15.0
 KIND_NODE_IMAGE_VERSION ?= v1.30.2
+BATS_VERSION ?= 1.11.0
+SHELLCHECK_VER ?= v0.10.0
+KIND_VERSION ?= v0.23.0
 TRIVY_VERSION ?=  0.52.2
 
 ## Tool Binaries
@@ -40,6 +43,9 @@ CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT := $(TOOLS_BIN_DIR)/golangci-lint
 HELM := helm
+KIND := kind
+ENVSUBST := envsubst
+BATS := bats
 TRIVY := trivy
 
 # Image URL to use all building/pushing image targets
@@ -153,23 +159,32 @@ endif
 ## --------------------------------------
 
 .PHONY: local-setup
-local-setup: docker-build ## setup and run sync controller locally
+local-setup: docker-build setup-kind-cluster helm-manifest-install ## setup and run sync controller locally
+	kubectl apply -f ./hack/localsetup/e2e-providerspc.yaml
+	kubectl apply -f ./hack/localsetup/e2e-secret-sync.yaml
+
+.PHONY: setup-kind-cluster
+setup-kind-cluster: 
 	kind delete cluster --name sync-controller
 	kind create cluster --name sync-controller \
 		--image kindest/node:$(KIND_NODE_IMAGE_VERSION) \
 		--config=./hack/localsetup/kind-config.yaml
 	kind load docker-image --name sync-controller $(IMAGE_TAG)
 
+.PHONY: helm-manifest-install ## Install Helm manifests
+helm-manifest-install:
 	cp manifest_staging/charts/secrets-store-sync-controller/values.yaml manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
-	sed -i '' '/providerContainer:/,/providervol:/s/^#//g' manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
+	@if [[ "$$(uname)" == "Darwin" ]]; then \
+		sed -i '' '/providerContainer:/,/providervol:/s/^#//g' manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml; \
+	else \
+		sed -i '/providerContainer:/,/providervol:/s/^#//g' manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml; \
+	fi
 	helm install secrets-store-sync-controller \
 		-f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml \
 		--set image.tag=$(VERSION) \
 		manifest_staging/charts/secrets-store-sync-controller
 	rm -f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
 
-	kubectl apply -f ./hack/localsetup/e2e-providerspc.yaml
-	kubectl apply -f ./hack/localsetup/e2e-secret-sync.yaml
 
 ## --------------------------------------
 ## Testing Binaries
@@ -177,6 +192,28 @@ local-setup: docker-build ## setup and run sync controller locally
 
 $(HELM): ## Install helm3 if not present
 	helm version --short | grep -q v3 || (curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash)
+
+$(BATS): ## Install bats for running the tests
+	bats --version | grep -q $(BATS_VERSION) || (curl -sSLO https://github.com/bats-core/bats-core/archive/v${BATS_VERSION}.tar.gz && tar -zxvf v${BATS_VERSION}.tar.gz && bash bats-core-${BATS_VERSION}/install.sh /usr/local)
+
+$(ENVSUBST): ## Install envsubst for running the tests
+	envsubst -V || (apt-get -o Acquire::Retries=30 update && apt-get -o Acquire::Retries=30 install gettext-base -y)
+
+SHELLCHECK := $(TOOLS_BIN_DIR)/shellcheck-$(SHELLCHECK_VER)
+$(SHELLCHECK): OS := $(shell uname | tr '[:upper:]' '[:lower:]')
+$(SHELLCHECK): ARCH := $(shell uname -m)
+$(SHELLCHECK):
+	mkdir -p $(TOOLS_BIN_DIR)
+	rm -rf "$(SHELLCHECK)*"
+	curl -sfOL "https://github.com/koalaman/shellcheck/releases/download/$(SHELLCHECK_VER)/shellcheck-$(SHELLCHECK_VER).$(OS).$(ARCH).tar.xz"
+	tar xf shellcheck-$(SHELLCHECK_VER).$(OS).$(ARCH).tar.xz
+	cp "shellcheck-$(SHELLCHECK_VER)/shellcheck" "$(SHELLCHECK)"
+	ln -sf "$(SHELLCHECK)" "$(TOOLS_BIN_DIR)/shellcheck"
+	chmod +x "$(TOOLS_BIN_DIR)/shellcheck" "$(SHELLCHECK)"
+	rm -rf shellcheck*
+
+$(KIND): ## Download and install kind
+	kind --version | grep -q $(KIND_VERSION) || (curl -L https://github.com/kubernetes-sigs/kind/releases/download/$(KIND_VERSION)/kind-linux-amd64 --output kind && chmod +x kind && mv kind /usr/local/bin/)
 
 $(TRIVY): ## Install trivy for image vulnerability scan
 	trivy -v | grep -q $(TRIVY_VERSION) || (curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v$(TRIVY_VERSION))
@@ -199,8 +236,9 @@ image-scan: $(TRIVY)
 ## --------------------------------------
 ## Linting
 ## --------------------------------------
+
 .PHONY: test-style
-test-style: lint lint-charts
+test-style: lint lint-charts shellcheck
 
 $(GOLANGCI_LINT): ## Build golangci-lint from tools folder.
 	cd $(TOOLS_MOD_DIR) && \
@@ -212,5 +250,21 @@ lint: $(GOLANGCI_LINT)
 	$(GOLANGCI_LINT) run --timeout=5m -v
 
 lint-charts: $(HELM) # Run helm lint tests
-	# ToDO: Add helm lint for 'charts' dir once released first version
-	$(HELM) lint manifest_staging/charts/secrets-store-sync-controller
+	helm lint manifest_staging/charts/secrets-store-sync-controller
+
+.PHONY: shellcheck
+shellcheck: $(SHELLCHECK)
+	find . \( -name '*.sh' -o -name '*.bash' \) | xargs $(SHELLCHECK)
+
+## --------------------------------------
+## E2E Testing
+## --------------------------------------
+
+.PHONY: e2e-setup ## Setup environment for e2e tests
+e2e-setup: $(HELM) $(BATS) $(ENVSUBST) $(KIND)
+
+
+# Run the e2e provider tests
+.PHONY: run-e2e-provider-tests
+run-e2e-provider-tests: e2e-setup docker-build setup-kind-cluster helm-manifest-install
+	bats -t -T test/bats/e2e-provider.bats
