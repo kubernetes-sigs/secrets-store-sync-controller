@@ -81,7 +81,7 @@ type SecretObject struct {
 
 // SecretSyncSpec defines the desired state for synchronizing secret.
 type SecretSyncSpec struct {
-	// secretSyncControllerName specifies the name of the secret sync controller used to synchronize
+	// secretSyncControllerName specifies the name of the secrets store sync controller used to synchronize
 	// the secret.
 	// +optional
 	// +kubebuilder:default:=""
@@ -110,7 +110,7 @@ type SecretSyncSpec struct {
 	SecretObject SecretObject `json:"secretObject"`
 
 	// forceSynchronization can be used to force the secret synchronization. The secret synchronization is
-	// triggered, by changing the value in this field.
+	// triggered by changing the value in this field.
 	// This field is not used to resolve synchronization conflicts.
 	// It is not related with the force query parameter in the Apply operation.
 	// https://kubernetes.io/docs/reference/using-api/server-side-apply/#conflicts
@@ -218,8 +218,8 @@ type SecretSyncStatus struct {
 // +kubebuilder:object:generate:=true
 // +kubebuilder:storageversion
 // +kubebuilder:subresource:status
-// SecretSync represents the desired state and observed state of the secret synchronization process.
-// The SecretSync name is used to as the secret object created by the controller.
+// SecretSync represents the desired and observed state of the secret synchronization process.
+// The SecretSync name is used as the name of the secret object created by the controller.
 type SecretSync struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

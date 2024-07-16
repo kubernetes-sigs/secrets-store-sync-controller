@@ -7,7 +7,7 @@
 apiVersion: admissionregistration.k8s.io/v1beta1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: "secret-sync-controller-validate-token-policy"
+  name: "secrets-store-sync-controller-validate-token-policy"
 spec:
   failurePolicy: Fail
   paramKind:

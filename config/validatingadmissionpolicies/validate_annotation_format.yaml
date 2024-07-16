@@ -3,7 +3,7 @@
 apiVersion: admissionregistration.k8s.io/v1beta1
 kind: ValidatingAdmissionPolicy
 metadata:
-  name: "secret-sync-validate-annotation-policy"
+  name: "secrets-store-sync-validate-annotation-policy"
 spec:
   failurePolicy: Fail
   matchConstraints:

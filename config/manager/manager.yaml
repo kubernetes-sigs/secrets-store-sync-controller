@@ -6,8 +6,8 @@ metadata:
     app.kubernetes.io/name: namespace
     app.kubernetes.io/instance: system
     app.kubernetes.io/component: manager
-    app.kubernetes.io/created-by: secret-sync-controller
-    app.kubernetes.io/part-of: secret-sync-controller
+    app.kubernetes.io/created-by: secrets-store-sync-controller
+    app.kubernetes.io/part-of: secrets-store-sync-controller
     app.kubernetes.io/managed-by: kustomize
   name: system
 ---
@@ -21,8 +21,8 @@ metadata:
     app.kubernetes.io/name: deployment
     app.kubernetes.io/instance: controller-manager
     app.kubernetes.io/component: manager
-    app.kubernetes.io/created-by: secret-sync-controller
-    app.kubernetes.io/part-of: secret-sync-controller
+    app.kubernetes.io/created-by: secrets-store-sync-controller
+    app.kubernetes.io/part-of: secrets-store-sync-controller
     app.kubernetes.io/managed-by: kustomize
 spec:
   selector:
@@ -36,21 +36,10 @@ spec:
       labels:
         control-plane: controller-manager
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: type
-                operator: NotIn
-                values:
-                - virtual-kubelet
       tolerations:
       - operator: Exists
       nodeSelector:
         kubernetes.io/os: linux
-      #securityContext:
-        # runAsNonRoot: true
       containers:
       - name: provider-e2e-installer
         image: aramase/e2e-provider:v0.0.1 # replace this with your provider image, the e2e-provider image is available at aramase/e2e-provider:v0.0.1
@@ -75,7 +64,7 @@ spec:
           - mountPath: "/provider"
             name: providervol
       - name: manager
-        image: secret-sync-controller:v0.0.1 # replace this with your acr image, the pre-alpha version of the controller is available at aramase/secrets-sync-controller:v0.0.1
+        image: secrets-store-sync-controller:v0.0.1 # replace this with your acr image, the pre-alpha version of the controller is available at aramase/secrets-sync-controller:v0.0.1
         ports:
         - name: metrics
           containerPort: 8085
@@ -87,9 +76,8 @@ spec:
         - --health-probe-bind-address=:8081
         - --metrics-bind-address=:8085
         - --leader-elect
-        #- --rotation-poll-interval-in-seconds=60s
         command:
-        - /manager
+        - /secrets-store-sync-controller
         env:
           - name: SYNC_CONTROLLER_POD_NAME
             valueFrom:
