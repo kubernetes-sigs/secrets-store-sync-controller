@@ -1,5 +1,5 @@
 /*
-Copyright 2020 The Kubernetes Authors.
+Copyright 2024 The Kubernetes Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -189,10 +189,10 @@ func GetSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretTy
 		dataKey := strings.TrimSpace(data.TargetKey)
 
 		if len(sourcePath) == 0 {
-			return datamap, fmt.Errorf("object name in secretObject.data")
+			return datamap, fmt.Errorf("source path in secretObject.data is empty")
 		}
 		if len(dataKey) == 0 {
-			return datamap, fmt.Errorf("key in secretObject.data is empty")
+			return datamap, fmt.Errorf("target key in secretObject.data is empty")
 		}
 		content, ok := files[sourcePath]
 		if !ok {
