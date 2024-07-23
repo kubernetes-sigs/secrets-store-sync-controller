@@ -44,7 +44,7 @@ TRIVY := trivy
 
 # Image URL to use all building/pushing image targets
 REGISTRY ?= docker.io
-IMAGE_NAME ?= secrets-store-sync-controller
+IMAGE_NAME ?= controller
 IMAGE_TAG ?= $(REGISTRY)/$(IMAGE_NAME):$(VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
