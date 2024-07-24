@@ -81,10 +81,11 @@ func runMain() error {
 		}
 		return nil
 	}
+
 	err := metrics.InitMetricsExporter()
 	if err != nil {
 		setupLog.Error(err, "failed to initialize metrics exporter")
-		return 1
+		return err
 	}
 
 	controllerConfig := ctrl.GetConfigOrDie()
@@ -113,10 +114,11 @@ func runMain() error {
 			grpc.MaxCallRecvMsgSize(*maxCallRecvMsgSize),
 		),
 	)
+
 	sr, err := controller.NewStatsReporter()
 	if err != nil {
 		setupLog.Error(err, "failed to initialize stats reporter")
-		return 1
+		return err
 	}
 
 	defer providerClients.Cleanup()
@@ -133,7 +135,7 @@ func runMain() error {
 		TokenClient:     tokenClient,
 		ProviderClients: providerClients,
 		Audiences:       audiences,
-		EventRecorder:   record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
+		EventRecorder:   record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secrets-store-sync-controller"}),
 		MetricReporter:  sr,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")

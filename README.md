@@ -18,7 +18,7 @@ For more information, see the [design proposal](https://docs.google.com/document
 > root and [check that the secret is created](#check-that-the-secret-is-created).
 
 You’ll need a Kubernetes cluster to run against. You can use [KIND](https://sigs.k8s.io/kind) to get a local cluster for testing, or run against a remote cluster.
-The helm chart for the controller has validating admission policies that are available for k8s 1.27 and later. If you are using an older version of k8s, you may need to disable the validating admission policies by setting the `validatingAdmissionPolicies.applyPolicies` parameter to `false` in the `secret-sync-controller/secretsync/values.yaml` file, but this is not recommended. We recommend using a k8s version 1.27 or later.
+The helm chart for the controller has validating admission policies that are available for k8s 1.27 and later. If you are using an older version of k8s, you may need to disable the validating admission policies by setting the `validatingAdmissionPolicies.applyPolicies` parameter to `false` in the `secrets-store-sync-controller/secretsync/values.yaml` file, but this is not recommended. We recommend using a k8s version 1.27 or later.
 
 Before you begin, ensure the [following](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#before-you-begin).
 
@@ -130,4 +130,4 @@ bats test/bats/e2e-provider-ssc.bats
 -->
 
 ## Troubleshooting
-The validating admission policies are available for k8s 1.27 and later. If you are using an older version of k8s, you may need to disable the validating admission policies by setting the `validatingAdmissionPolicies.applyPolicies` parameter to `false` in the `secret-sync-controller/secretsync/values.yaml` file.
+The validating admission policies are available for k8s 1.27 and later. If you are using an older version of k8s, you may need to disable the validating admission policies by setting the `validatingAdmissionPolicies.applyPolicies` parameter to `false` in the `secrets-store-sync-controller/secretsync/values.yaml` file.
