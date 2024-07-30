@@ -1,6 +1,6 @@
-# This policy validates the configuration of the token that is created by the secret-sync-controller.
+# This policy validates the configuration of the token that is created by the secrets-store-sync-controller.
 # It requires the parameters controllerName, controllerNamespace, token expiration, and token audiences
-# to be set in the ConfigMap admission-policies-secret-sync-controller-config.
+# to be set in the ConfigMap admission-policies-secrets-store-sync-controller-config.
 # The user must configure:
 #   the token audiences
 #   the controllerName and controllerNamespace parameters

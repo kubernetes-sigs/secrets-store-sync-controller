@@ -39,6 +39,7 @@ import (
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/metrics"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
 )
 
@@ -633,6 +634,16 @@ func newSecretSyncReconciler(
 
 	providerClients := provider.NewPluginClientBuilder([]string{socketPath})
 
+	err = metrics.InitMetricsExporter()
+	if err != nil {
+		t.Fatalf("failed to initialize metrics exporter")
+	}
+
+	sr, err := NewStatsReporter()
+	if err != nil {
+		t.Fatalf("failed to initialize stats reporter")
+	}
+
 	// Create a ReconcileSecretSync object with the scheme and fake client
 	kubeClient := fakeclient.NewSimpleClientset(testSecret)
 	ssc := &SecretSyncReconciler{
@@ -641,6 +652,7 @@ func newSecretSyncReconciler(
 		Scheme:          scheme,
 		TokenClient:     k8s.NewTokenClient(kubeClient),
 		ProviderClients: providerClients,
+		MetricReporter:  sr,
 	}
 
 	return &testSecretSyncReconciler{
