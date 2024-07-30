@@ -64,7 +64,7 @@ spec:
           - mountPath: "/provider"
             name: providervol
       - name: manager
-        image: secrets-store-sync-controller:v0.0.1 # replace this with your acr image, the pre-alpha version of the controller is available at aramase/secrets-sync-controller:v0.0.1
+        image: controller:v0.0.1 # replace this with your acr image, the pre-alpha version of the controller is available at aramase/secrets-sync-controller:v0.0.1
         ports:
         - name: metrics
           containerPort: 8085

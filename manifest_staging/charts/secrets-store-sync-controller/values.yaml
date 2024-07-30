@@ -25,7 +25,7 @@ validatingAdmissionPolicies:
     - "kubernetes.io/service-account-token"
 
 image:
-  repository: secrets-store-sync-controller # e.g. my-registry.example.com/my-repo
+  repository: controller # e.g. my-registry.example.com/my-repo
   pullPolicy: IfNotPresent
   tag: "v0.0.1"
 
