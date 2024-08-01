@@ -26,3 +26,7 @@ This doc lists the different Secret Sync scenarios tested as part of CI.
 | Deploy `e2e-providerspc` SecretSync CRD                                                                | ✔️  |
 | Deploy SecretProviderClass and SecretSync in different namespaces and check that no secret is created  | ✔️  |
 | Deploy SecretProviderClass and SecretSync, ensure secret is created, then delete SecretSync and verify | ✔️  |
+| Validating Admission Policy blocks secret creation when its type is not in the allowed list            | ✔️  |
+| Validating Admission Policy blocks secret creation when its type is in the disallowed list             | ✔️  |
+| Validating Admission Policy blocks secretsync creation when an annotation is invalid                   | ✔️  |
+| Validating Admission Policy blocks secretsync creation when a label is invalid                         | ✔️  |
