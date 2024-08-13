@@ -30,8 +30,8 @@ SLEEP_TIME=1
 }
 
 @test "[v1alpha1] validate secret creation and deletion with SecretProviderClass and SecretSync" { 
-  kubectl create namespace test-v1alpha1 --dry-run=client -o yaml | kubectl apply -f -
-
+  create_namespace test-v1alpha1
+  
   # Create the SPC
   kubectl apply -n test-v1alpha1 -f $BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml
 
@@ -52,6 +52,7 @@ SLEEP_TIME=1
   expected_data="secret"
   secret_data=$(kubectl get secret sse2esecret -n test-v1alpha1 -o jsonpath='{.data.bar}' | base64 --decode)
   [ "$secret_data" = "$expected_data" ]
+
   # Check owner_count is 1
   cmd="compare_owner_count sse2esecret test-v1alpha1 1"
   wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
@@ -66,54 +67,85 @@ SLEEP_TIME=1
 }
 
 @test "SecretProviderClass and SecretSync are deployed in different namespaces" {
-  # Create namespaces
-  kubectl create namespace spc-namespace --dry-run=client -o yaml | kubectl apply -f -
-  kubectl create namespace ss-namespace --dry-run=client -o yaml | kubectl apply -f -
+  create_namespace "spc-namespace"
+  create_namespace "ss-namespace"
 
-  # Deploy the SecretProviderClass in spc-namespace
-  kubectl apply -n spc-namespace -f $BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml 
+  deploy_spc_ss_verify_conditions \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml" \
+    "sse2esecret" \
+    "Secret update failed because the controller could not retrieve the Secret Provider Class or the SPC is misconfigured. Check the logs or the events for more information." \
+    "ControllerSPCError" \
+    "False" \
+    "spc-namespace" \
+    "ss-namespace"
 
-  cmd="kubectl get secretproviderclasses.secrets-store.csi.x-k8s.io/e2e-providerspc -n spc-namespace -o yaml | grep e2e-providerspc"
-  wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+  kubectl delete -f "$BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml" -n ss-namespace
+}
 
-  # Deploy the SecretSync in ss-namespace
-  kubectl apply -n ss-namespace -f $BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml
+@test "Cannot create secret with type not in allowed list" {
+  deploy_spc_ss_verify_conditions \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
+    "$BATS_RESOURCE_YAML_DIR/api_credential_secretsync.yaml" \
+    "my-custom-api-secret" \
+    "Secret update failed due to validating admission policy check failure, check the logs or the events for more information." \
+    "ValidatingAdmissionPolicyCheckFailed" \
+    "False"
 
-  cmd="kubectl get secretsyncs.secret-sync.x-k8s.io/sse2esecret -n ss-namespace -o yaml | grep sse2esecret"
-  wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+  kubectl delete -f "$BATS_RESOURCE_YAML_DIR/api_credential_secretsync.yaml"
+}
 
-  # Check the status of SecretSync in ss-namespace
-  status=$(kubectl get secretsyncs.secret-sync.x-k8s.io/sse2esecret -n ss-namespace -o jsonpath='{.status.conditions[0]}')
+@test "Cannot create secret with disallowed type" {
+  deploy_spc_ss_verify_conditions \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
+    "$BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml" \
+    "sse2eserviceaccountsecret" \
+    "Secret update failed due to validating admission policy check failure, check the logs or the events for more information." \
+    "ValidatingAdmissionPolicyCheckFailed" \
+    "False"
 
-  expected_message="Secret update failed because the controller could not retrieve the Secret Provider Class or the SPC is misconfigured. Check the logs or the events for more information."
-  expected_reason="ControllerSPCError"
-  expected_status="False"
+  kubectl delete -f $BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml
+}
 
-  # Extract individual fields from the status
-  message=$(echo $status | jq -r .message)
-  reason=$(echo $status | jq -r .reason)
-  status_value=$(echo $status | jq -r .status)
+@test "Cannot create a secret with invalid annotations" {
+  expected_message="The secretsyncs \"sse2einvalidannotationssecret\" is invalid: : ValidatingAdmissionPolicy 'secrets-store-sync-controller-validate-annotation-policy' with binding 'secrets-store-sync-controller-validate-annotation-policy-binding' denied request: One of the annotations applied on the secret has an invalid format. Update the annotation and try again."
 
-  # Verify the status fields
-  [ "$message" = "$expected_message" ]
-  [ "$reason" = "$expected_reason" ]
-  [ "$status_value" = "$expected_status" ]
+  deploy_spc_ss_expect_failure \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
+    "$BATS_RESOURCE_YAML_DIR/invalid_annotation_key_secretsync.yaml" \
+    "sse2einvalidannotationssecret" \
+    "$expected_message"
 
-  # Check that the secret is not created in ss-namespace
-  cmd="kubectl get secret sse2esecret -n ss-namespace"
-  run $cmd
-  assert_failure
+  deploy_spc_ss_expect_failure \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
+    "$BATS_RESOURCE_YAML_DIR/invalid_annotation_value_secretsync.yaml" \
+    "sse2einvalidannotationssecret" \
+    "$expected_message"
+}
+
+@test "Cannot create a secret with invalid labels" {
+  expected_message="The secretsyncs \"sse2einvalidlabelsecret\" is invalid: : ValidatingAdmissionPolicy 'secrets-store-sync-controller-validate-label-policy' with binding 'secrets-store-sync-controller-validate-label-policy-binding' denied request: One of the labels applied on the secret has an invalid format. Update the label and try again."
+
+  deploy_spc_ss_expect_failure \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
+    "$BATS_RESOURCE_YAML_DIR/invalid_label_key_secretsync.yaml" \
+    "sse2einvalidlabelsecret" \
+    "$expected_message"
+
+  deploy_spc_ss_expect_failure \
+    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
+    "$BATS_RESOURCE_YAML_DIR/invalid_label_value_secretsync.yaml" \
+    "sse2einvalidlabelsecret" \
+    "$expected_message"
 }
 
 teardown_file() {
   archive_provider "app=secrets-store-sync-controller" || true
   archive_info || true
 
-  if [[ "${INPLACE_UPGRADE_TEST}" != "true" ]]; then
-    #cleanup
-    run kubectl delete namespace test-v1alpha1
-    run kubectl delete namespace spc-namespace
-    run kubectl delete namespace ss-namespace
-    echo "Done cleaning up e2e tests"
-  fi
+  run kubectl delete namespace test-v1alpha1
+  run kubectl delete namespace spc-namespace
+  run kubectl delete namespace ss-namespace
+
+  echo "Done cleaning up e2e tests"
 }
