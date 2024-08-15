@@ -97,6 +97,7 @@ type SecretSyncReconciler struct {
 	TokenClient     *k8s.TokenClient
 	ProviderClients AllClientBuilder
 	EventRecorder   record.EventRecorder
+	MetricReporter  StatsReporter
 }
 
 //+kubebuilder:rbac:groups=secret-sync.x-k8s.io,resources=secretsyncs,verbs=get;list;watch
@@ -106,9 +107,20 @@ type SecretSyncReconciler struct {
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
-func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
+	begin := time.Now()
+
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling SecretSync", "namespace=", req.NamespacedName.String())
+
+	defer func() {
+		wasSuccessful := err == nil
+		if !wasSuccessful && strings.Contains(strings.ToLower(err.Error()), "validatingadmissionpolicy") {
+			r.MetricReporter.ReportVAPDenyMetric(ctx, err.Error(), req.Namespace)
+		}
+		r.MetricReporter.ReportRotationReconcile(ctx, wasSuccessful, req.Namespace)
+		r.MetricReporter.ReportRotationReconcileDuration(ctx, time.Since(begin).Seconds(), wasSuccessful, req.Namespace)
+	}()
 
 	// get the secret sync object
 	ss := &secretsyncv1alpha1.SecretSync{}
@@ -345,6 +357,13 @@ func checkIfErrorMessageCanBeDisplayed(errorMessage string) bool {
 // serverSidePatchSecret performs a server-side patch on a Kubernetes Secret.
 // It updates the specified secret with the provided data, labels, and annotations.
 func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, name, namespace string, datamap map[string][]byte, _, labels, annotations map[string]string, secretType corev1.SecretType) (err error) {
+	begin := time.Now()
+
+	defer func() {
+		wasSuccessful := err == nil
+		r.MetricReporter.ReportSecretSyncDuration(ctx, time.Since(begin).Seconds(), wasSuccessful, namespace)
+	}()
+
 	secretKind := "Secret"
 	secretVersion := "v1"
 
