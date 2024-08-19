@@ -1,0 +1,24 @@
+{{- if .Values.validatingAdmissionPolicies.applyPolicies -}}
+{{ include "secrets-store-sync-controller.admissionApiVersion" . }}
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: "secrets-store-sync-controller-create-update-token-deny-policy"
+spec:
+  failurePolicy: Fail
+  matchConditions:
+    - name: 'user-is-secrets-store-sync-controller'
+      expression: {{ include "chartname.matchConditionExpression" . | quote }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["secrets"]
+  variables:
+    - name: deniedSecretTypes
+      expression: {{ include "chartname.secretTypesList" .Values.validatingAdmissionPolicies.deniedSecretTypes | quote }}
+  validations:
+    - expression: "variables.deniedSecretTypes == false"
+      message: "Only secrets with types defined in the allowedSecretTypes are allowed."
+      messageExpression: "'secrets-store-sync-controller has failed to ' +  string(request.operation) + ' secret with ' + string(object.type) + ' type ' + 'in the ' + string(request.namespace) + ' namespace. The controller is not allowed to create or update secrets with this type.'"
+{{- end -}}
