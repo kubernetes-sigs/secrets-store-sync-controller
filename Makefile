@@ -179,8 +179,9 @@ helm-manifest-install:
 	else \
 		sed -i '/providerContainer:/,/providervol:/s/^#//g' manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml; \
 	fi
-	helm install secrets-store-sync-controller \
+	helm install secrets-store-sync-controller --wait --timeout=5m \
 		-f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml \
+		--set image.repository=$(REGISTRY)/$(IMAGE_NAME) \
 		--set image.tag=$(VERSION) \
 		manifest_staging/charts/secrets-store-sync-controller
 	rm -f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
@@ -263,8 +264,34 @@ shellcheck: $(SHELLCHECK)
 .PHONY: e2e-setup ## Setup environment for e2e tests
 e2e-setup: $(HELM) $(BATS) $(ENVSUBST) $(KIND)
 
+.PHONY: e2e-bootstrap
+e2e-bootstrap: e2e-setup docker-build setup-kind-cluster helm-manifest-install ## Bootstrap the e2e environment
 
 # Run the e2e provider tests
 .PHONY: run-e2e-provider-tests
-run-e2e-provider-tests: e2e-setup docker-build setup-kind-cluster helm-manifest-install
+run-e2e-provider-tests:
 	bats -t -T test/bats/e2e-provider.bats
+
+## --------------------------------------
+## Release
+## --------------------------------------
+.PHONY: release-manifest
+release-manifest:
+	$(MAKE) manifests
+	@if [[ "$$(uname)" == "Darwin" ]]; then \
+		sed -i '' "s/version: .*/version: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
+		sed -i '' "s/appVersion: .*/appVersion: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
+		sed -i '' "s/tag: \"v${CURRENTVERSION}/tag: \"v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
+		sed -i '' "s/v${CURRENTVERSION}/v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/README.md; \
+	else \
+		sed -i "s/version: .*/version: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
+		sed -i "s/appVersion: .*/appVersion: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
+		sed -i "s/tag: \"v${CURRENTVERSION}/tag: \"v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
+		sed -i "s/v${CURRENTVERSION}/v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/README.md; \
+	fi
+
+.PHONY: promote-staging-manifest
+promote-staging-manifest: #promote staging manifests to release dir
+	$(MAKE) release-manifest
+	@rm -rf charts/secrets-store-sync-controller
+	@cp -r manifest_staging/charts ./charts
