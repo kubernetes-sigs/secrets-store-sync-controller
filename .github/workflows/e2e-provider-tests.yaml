@@ -1,4 +1,4 @@
-name: e2e_provider_tests
+name: E2E Provider Tests
 
 on:
   workflow_dispatch:
