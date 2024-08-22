@@ -295,4 +295,4 @@ release-manifest:
 promote-staging-manifest: #promote staging manifests to release dir
 	$(MAKE) release-manifest
 	@rm -rf charts/secrets-store-sync-controller/
-	@cp -r manifest_staging/charts ./charts
+	@cp -r manifest_staging/charts/ ./charts

@@ -1,4 +1,4 @@
-name: publish_helm_chart
+name: Publish Helm Chart
 
 on:
   push:
@@ -14,7 +14,7 @@ permissions:
   contents: write
 
 jobs:
-  deploy:
+  publish-chart:
     runs-on: ubuntu-latest
     steps:
       - name: Harden Runner
