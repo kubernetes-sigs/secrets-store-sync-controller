@@ -180,6 +180,7 @@ helm-manifest-install:
 		sed -i '/providerContainer:/,/providervol:/s/^#//g' manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml; \
 	fi
 	helm install secrets-store-sync-controller --wait --timeout=5m \
+		--namespace secrets-store-sync-controller-system --create-namespace \
 		-f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml \
 		--set image.repository=$(REGISTRY)/$(IMAGE_NAME) \
 		--set image.tag=$(VERSION) \
@@ -280,18 +281,18 @@ release-manifest:
 	$(MAKE) manifests
 	@if [[ "$$(uname)" == "Darwin" ]]; then \
 		sed -i '' "s/version: .*/version: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i '' "s/appVersion: .*/appVersion: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i '' "s/tag: \"v${CURRENTVERSION}/tag: \"v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
+		sed -i '' "s/appVersion: v .*/appVersion: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
+		sed -i '' "s/tag: v${CURRENTVERSION}/tag: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
 		sed -i '' "s/v${CURRENTVERSION}/v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/README.md; \
 	else \
 		sed -i "s/version: .*/version: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i "s/appVersion: .*/appVersion: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i "s/tag: \"v${CURRENTVERSION}/tag: \"v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
+		sed -i "s/appVersion: v .*/appVersion: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
+		sed -i "s/tag: v${CURRENTVERSION}/tag: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
 		sed -i "s/v${CURRENTVERSION}/v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/README.md; \
 	fi
 
 .PHONY: promote-staging-manifest
 promote-staging-manifest: #promote staging manifests to release dir
 	$(MAKE) release-manifest
-	@rm -rf charts/secrets-store-sync-controller
+	@rm -rf charts/secrets-store-sync-controller/
 	@cp -r manifest_staging/charts ./charts
