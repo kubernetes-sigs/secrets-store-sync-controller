@@ -1,0 +1,46 @@
+name: "Lint PR"
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+      - auto_merge_enabled
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate-pr-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@eb238b55efaa70779f274895e782ed17c84f2895 # v2.6.1
+        with:
+          egress-policy: audit
+      - name: Validate PR Title
+        uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155ed6017 # v5.5.3
+        with:
+          types: |
+            chore
+            ci
+            docs
+            feat
+            fix
+            perf
+            refactor
+            release
+            revert
+            security
+            test
+          requireScope: false
+          subjectPattern: ^(?![A-Z]).+$ # subject doesn't start with an uppercase character.
+          subjectPatternError: |
+            The subject "{subject}" found in the pull request title "{title}"
+            didn't match the configured pattern. Please ensure that the subject
+            doesn't start with an uppercase character.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
