@@ -24,7 +24,7 @@ steps:
     args:
     - -c
     - |
-      gcloud auth configure-docker \
+      gcloud auth configure-docker us-central1-docker.pkg.dev \
       && make build-and-push
 substitutions:
   # _GIT_TAG will be filled with a git-based tag for the image, of the form vYYYYMMDD-hash, and
