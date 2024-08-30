@@ -10,7 +10,7 @@ GOARCH  := $(shell go env GOARCH)
 GOOS    := $(shell go env GOOS)
 GOPROXY := $(shell go env GOPROXY)
 
-GO_FILES=$(shell go list ./... | grep -v /test/sanity)
+GO_FILES=$(shell go list ./...)
 TOOLS_MOD_DIR := ./hack/tools
 TOOLS_DIR := $(abspath ./hack/tools)
 TOOLS_BIN_DIR := $(TOOLS_DIR)/bin
