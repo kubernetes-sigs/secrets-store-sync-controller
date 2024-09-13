@@ -253,6 +253,7 @@ lint: $(GOLANGCI_LINT)
 
 lint-charts: $(HELM) # Run helm lint tests
 	helm lint manifest_staging/charts/secrets-store-sync-controller
+	helm lint charts/secrets-store-sync-controller
 
 .PHONY: shellcheck
 shellcheck: $(SHELLCHECK)
