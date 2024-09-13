@@ -1,6 +1,6 @@
 module sigs.k8s.io/secrets-store-sync-controller
 
-go 1.22
+go 1.23.1
 
 require (
 	github.com/google/go-cmp v0.6.0
