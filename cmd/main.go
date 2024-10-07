@@ -173,13 +173,14 @@ func getKlogLevel() klog.Level {
 }
 
 func convertKlogLevelToMlogLevel(klogLevel klog.Level) mlog.LogLevel {
-	if klogLevel >= 0 && klogLevel < 2 {
+	switch {
+	case klogLevel >= 0 && klogLevel < 2:
 		return mlog.LevelWarning
-	} else if klogLevel >= 2 && klogLevel < 4 {
+	case klogLevel >= 2 && klogLevel < 4:
 		return mlog.LevelInfo
-	} else if klogLevel >= 4 && klogLevel < 6 {
+	case klogLevel >= 4 && klogLevel < 6:
 		return mlog.LevelDebug
-	} else {
+	default:
 		return mlog.LevelAll
 	}
 }
