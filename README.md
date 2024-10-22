@@ -8,7 +8,7 @@ This is a Kubernetes controller that watches for changes to a custom resource an
 
 This proposal is a diversion from the current design of the Secrets Store CSI driver. Based on feedback, some of the users want the CSI driver to sync the secret store objects as Kubernetes secrets without the mount instead of the tight coupling between the mount and the sync as it is [today](https://secrets-store-csi-driver.sigs.k8s.io/topics/sync-as-kubernetes-secret).
 
-To support this, we could extract the sync controller from the CSI driver and have it as a standalone deployment. Just syncing as Kubernetes secrets is a cluster-scope operation and doesn’t require the controller or CSI pods to be run on all nodes. The controller would need to watch for Create/Update events for the Secret Sync (SS) and create the Kubernetes secrets by making an RPC call to the provider.
+To support this, we have extracted the sync controller from the CSI driver and have provided it as a standalone deployment. Syncing Kubernetes secrets is a cluster-scope operation and doesn’t require the controller or CSI pods to be run on all nodes. The controller watches for Create/Update events for the Secret Sync (SS) and create the Kubernetes secrets by making an RPC call to the provider.
 
 For more information, see the [design proposal](https://docs.google.com/document/d/1Ylwpg-YXNw6kC9-kdHNYD3ZKskj9TTIopwIxz5VUOW4/edit#heading=h.n3xa8h2b1inm).
 
