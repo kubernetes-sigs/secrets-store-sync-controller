@@ -43,7 +43,7 @@ As the controller is still under development, the helm chart is not available in
    ```shell
    VERSION=e2e make docker-build
    
-   kind load docker-image --name sync-controller secrets-store-sync-controller:e2e
+   kind load docker-image --name sync-controller controller:e2e
    ```
 
 1. Configure the provider container
