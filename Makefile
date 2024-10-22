@@ -163,8 +163,44 @@ local-setup: docker-build setup-kind-cluster helm-manifest-install ## setup and 
 	kubectl apply -f ./hack/localsetup/e2e-providerspc.yaml
 	kubectl apply -f ./hack/localsetup/e2e-secret-sync.yaml
 
+.PHONY: generate-kind-config
+generate-kind-config:
+	@echo "Generating kind-config.yaml based on Kubernetes version $(KIND_NODE_IMAGE_VERSION)"
+	@K8S_VERSION=$(KIND_NODE_IMAGE_VERSION); \
+	FEATURE_GATES=""; \
+	RUNTIME_CONFIG=""; \
+	if echo "$$K8S_VERSION" | grep -qE "^v1\.25\.|^v1\.26\."; then \
+		FEATURE_GATES="ValidatingAdmissionPolicy: true"; \
+		RUNTIME_CONFIG="admissionregistration.k8s.io/v1alpha1: true"; \
+	elif echo "$$K8S_VERSION" | grep -qE "^v1\.27\."; then \
+		FEATURE_GATES="ValidatingAdmissionPolicy: true"; \
+		RUNTIME_CONFIG=""; \
+	elif echo "$$K8S_VERSION" | grep -qE "^v1\.28\."; then \
+		FEATURE_GATES=""; \
+		RUNTIME_CONFIG="admissionregistration.k8s.io/v1beta1: true"; \
+	elif echo "$$K8S_VERSION" | grep -qE "^v1\.29\."; then \
+		FEATURE_GATES="ValidatingAdmissionPolicy: true"; \
+		RUNTIME_CONFIG="admissionregistration.k8s.io/v1: true"; \
+	else \
+		FEATURE_GATES=""; \
+		RUNTIME_CONFIG=""; \
+	fi; \
+	mkdir -p hack/localsetup; \
+	{ \
+	echo "kind: Cluster"; \
+	echo "apiVersion: kind.x-k8s.io/v1alpha4"; \
+	if [ -n "$$FEATURE_GATES" ]; then \
+		echo "featureGates:"; \
+		echo "  $$FEATURE_GATES"; \
+	fi; \
+	if [ -n "$$RUNTIME_CONFIG" ]; then \
+		echo "runtimeConfig:"; \
+		echo "  $$RUNTIME_CONFIG"; \
+	fi; \
+	} > hack/localsetup/kind-config.yaml
+
 .PHONY: setup-kind-cluster
-setup-kind-cluster: 
+setup-kind-cluster: generate-kind-config
 	kind delete cluster --name sync-controller
 	kind create cluster --name sync-controller \
 		--image kindest/node:$(KIND_NODE_IMAGE_VERSION) \
