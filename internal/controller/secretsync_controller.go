@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/klog/v2"
+
 	"golang.org/x/crypto/pbkdf2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -39,7 +41,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
@@ -107,13 +108,12 @@ type SecretSyncReconciler struct {
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
 func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconciling SecretSync", "namespace=", req.NamespacedName.String())
+	klog.V(4).InfoS("Reconciling SecretSync", "namespace", req.Namespace, "name", req.Name)
 
 	// get the secret sync object
 	ss := &secretsyncv1alpha1.SecretSync{}
 	if err := r.Get(ctx, req.NamespacedName, ss); err != nil {
-		logger.Error(err, "unable to fetch SecretSync")
+		klog.ErrorS(err, "Unable to fetch SecretSync")
 		return ctrl.Result{}, err
 	}
 
@@ -130,7 +130,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	secretName := strings.TrimSpace(ss.Name)
 	secretObj := ss.Spec.SecretObject
 	if err := secretutil.ValidateSecretObject(secretName, secretObj); err != nil {
-		logger.Error(err, "failed to validate secret object", "secretName", secretName)
+		klog.ErrorS(err, "Failed to validate secret object", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
 		return ctrl.Result{}, err
 	}
@@ -143,7 +143,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// get the service account token
 	serviceAccountTokenAttrs, err := r.TokenClient.SecretProviderServiceAccountTokenAttrs(ss.Namespace, ss.Spec.ServiceAccountName, r.Audiences)
 	if err != nil {
-		logger.Error(err, "failed to get service account token", "name", ss.Spec.ServiceAccountName)
+		klog.ErrorS(err, "Failed to get service account token", "name", ss.Spec.ServiceAccountName)
 
 		conditionReason := ConditionReasonSecretPatchFailedUnknownError
 		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
@@ -158,7 +158,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
 	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
-		logger.Error(err, "failed to get secret provider class", "name", ss.Spec.SecretProviderClassName)
+		klog.ErrorS(err, "Failed to get secret provider class", "name", ss.Spec.SecretProviderClassName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
 		return ctrl.Result{}, err
 	}
@@ -180,7 +180,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	paramsJSON, err := json.Marshal(parameters)
 	if err != nil {
-		logger.Error(err, "failed to marshal parameters", "parameters", parameters)
+		klog.ErrorS(err, "Failed to marshal parameters", "parameters", parameters)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
 		return ctrl.Result{}, err
 	}
@@ -188,7 +188,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	providerName := string(spc.Spec.Provider)
 	providerClient, err := r.ProviderClients.Get(ctx, providerName)
 	if err != nil {
-		logger.Error(err, "failed to get provider client", "provider", providerName)
+		klog.ErrorS(err, "Failed to get provider client", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
 		return ctrl.Result{}, err
 	}
@@ -197,7 +197,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	var secretsJSON []byte
 	secretsJSON, err = json.Marshal(secretRefData)
 	if err != nil {
-		logger.Error(err, "failed to marshal secret")
+		klog.ErrorS(err, "Failed to marshal secret")
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
 		return ctrl.Result{}, err
 	}
@@ -206,7 +206,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	objectVersions, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
 	if err != nil {
-		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
+		klog.ErrorS(err, "Failed to get secrets from provider", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedProviderError, true)
 		return ctrl.Result{}, err
 	}
@@ -214,7 +214,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	secretType := secretutil.GetSecretType(strings.TrimSpace(secretObj.Type))
 	var datamap map[string][]byte
 	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
-		logger.Error(err, "failed to get secret data", "secretName", secretName)
+		klog.ErrorS(err, "Failed to get secret data", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
 		return ctrl.Result{}, err
 	}
@@ -222,7 +222,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Compute the hash of the secret
 	syncHash, err := r.computeSecretDataObjectHash(datamap, spc, ss)
 	if err != nil {
-		logger.Error(err, "failed to compute secret data object hash", "secretName", secretName)
+		klog.ErrorS(err, "Failed to compute secret data object hash", "secretName", secretName)
 		return ctrl.Result{}, err
 	}
 
@@ -263,7 +263,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Attempt to create or update the secret.
 	if err = r.serverSidePatchSecret(ctx, ss, secretName, req.Namespace, datamap, objectVersions, labels, annotations, secretType); err != nil {
-		logger.Error(err, "failed to patch secret", "secretName", secretName)
+		klog.ErrorS(err, "Failed to patch secret", "secretName", secretName)
 
 		// Rollback to the previous hash and the previous last successful sync time.
 		ss.Status.SyncHash = prevSecretHash
@@ -296,7 +296,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	logger.V(4).Info("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
+	klog.V(4).InfoS("Status updated", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
 	return ctrl.Result{}, nil
 }
 
