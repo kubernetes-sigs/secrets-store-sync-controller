@@ -169,7 +169,7 @@ generate-kind-config:
 	@K8S_VERSION=$(KIND_NODE_IMAGE_VERSION); \
 	FEATURE_GATES=""; \
 	RUNTIME_CONFIG=""; \
-	if echo "$$K8S_VERSION" | grep -qE "^v1\.27\."; then \
+	if echo "$$K8S_VERSION" | grep -qE "^v1\.(26|27)\."; then \
 		FEATURE_GATES="ValidatingAdmissionPolicy: true"; \
 		RUNTIME_CONFIG="admissionregistration.k8s.io/v1alpha1: true"; \
 	elif echo "$$K8S_VERSION" | grep -qE "^v1\.(28|29)\."; then \
