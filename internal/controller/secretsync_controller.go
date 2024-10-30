@@ -23,7 +23,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/go-logr/logr"
 	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -106,6 +108,7 @@ type SecretSyncReconciler struct {
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
+// Reconcile method includes requeue logic
 func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling SecretSync", "namespace=", req.NamespacedName.String())
@@ -116,6 +119,45 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		logger.Error(err, "unable to fetch SecretSync")
 		return ctrl.Result{}, err
 	}
+
+	if ss.Spec.RefreshInterval == nil {
+		err := r.reconcileSecretSync(ctx, ss)
+		if err != nil {
+			logger.Error(err, "reconciliation error")
+			//	// If there's an error, we might want to retry sooner
+			//	return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+		return ctrl.Result{Requeue: false}, err
+	}
+
+	nextRefresh := calculateNextRefresh(ss)
+	requeueAfter := time.Until(nextRefresh)
+
+	// If we're past the refresh time, reconcile now
+	if requeueAfter < 0 {
+		err := r.reconcileSecretSync(ctx, ss)
+		if err != nil {
+			return ctrl.Result{Requeue: true, RequeueAfter: ss.Spec.RefreshInterval.Duration}, err
+		}
+		_ = r.updateLastSyncTime(ctx, ss, logger)
+		return ctrl.Result{RequeueAfter: ss.Spec.RefreshInterval.Duration}, nil
+	}
+
+	// Return with the calculated requeue duration
+	return ctrl.Result{Requeue: true, RequeueAfter: requeueAfter}, nil
+}
+
+func (r *SecretSyncReconciler) updateLastSyncTime(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, logger logr.Logger) error {
+	ss.Status.LastSuccessfulSyncTime = &metav1.Time{Time: time.Now()}
+	if err := r.Status().Update(ctx, ss); err != nil {
+		logger.Error(err, "failed to update LastSuccessfulSyncTime")
+		return err
+	}
+	return nil
+}
+
+func (r *SecretSyncReconciler) reconcileSecretSync(ctx context.Context, ss *secretsyncv1alpha1.SecretSync) error {
+	logger := log.FromContext(ctx)
 
 	// update status conditions
 	r.updateStatusConditions(ctx, ss, "", ConditionTypeUnknown, ConditionReasonUnknown, false)
@@ -132,12 +174,12 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := secretutil.ValidateSecretObject(secretName, secretObj); err != nil {
 		logger.Error(err, "failed to validate secret object", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	labels, annotations, err := r.prepareLabelsAndAnnotations(ctx, secretObj, ss, conditionType)
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// get the service account token
@@ -152,15 +194,15 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, conditionReason, true)
 
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
-	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
+	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: ss.Namespace}, spc); err != nil {
 		logger.Error(err, "failed to get secret provider class", "name", ss.Spec.SecretProviderClassName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// this is to mimic the parameters sent from CSI driver to the provider
@@ -171,7 +213,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	parameters[CSIPodName] = os.Getenv(SyncControllerPodName)
 	parameters[CSIPodUID] = os.Getenv(SyncControllerPodUID)
-	parameters[CSIPodNamespace] = req.Namespace
+	parameters[CSIPodNamespace] = ss.Namespace
 	parameters[CSIPodServiceAccountName] = ss.Spec.ServiceAccountName
 
 	for k, v := range serviceAccountTokenAttrs {
@@ -182,7 +224,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to marshal parameters", "parameters", parameters)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	providerName := string(spc.Spec.Provider)
@@ -190,7 +232,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to get provider client", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	secretRefData := make(map[string]string)
@@ -199,7 +241,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to marshal secret")
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	oldObjectVersions := make(map[string]string)
@@ -208,7 +250,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedProviderError, true)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	secretType := secretutil.GetSecretType(strings.TrimSpace(secretObj.Type))
@@ -216,14 +258,14 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
 		logger.Error(err, "failed to get secret data", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Compute the hash of the secret
 	syncHash, err := r.computeSecretDataObjectHash(datamap, spc, ss)
 	if err != nil {
 		logger.Error(err, "failed to compute secret data object hash", "secretName", secretName)
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// Check if the hash has changed.
@@ -240,7 +282,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if len(failedCondition.Type) == 0 && !hashChanged {
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateNoValueChangeSucceeded, true)
-		return ctrl.Result{}, nil
+		return nil
 	}
 
 	if conditionType == ConditionTypeCreate {
@@ -262,7 +304,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Attempt to create or update the secret.
-	if err = r.serverSidePatchSecret(ctx, ss, secretName, req.Namespace, datamap, objectVersions, labels, annotations, secretType); err != nil {
+	if err = r.serverSidePatchSecret(ctx, ss, secretName, ss.Namespace, datamap, objectVersions, labels, annotations, secretType); err != nil {
 		logger.Error(err, "failed to patch secret", "secretName", secretName)
 
 		// Rollback to the previous hash and the previous last successful sync time.
@@ -280,7 +322,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonSecretPatchFailedUnknownError, true)
 		}
 
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// No errors found, remove the failed conditions.
@@ -293,11 +335,11 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Update the status.
 	err = r.Client.Status().Update(ctx, ss)
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
 	logger.V(4).Info("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
-	return ctrl.Result{}, nil
+	return nil
 }
 
 func (r *SecretSyncReconciler) prepareLabelsAndAnnotations(
@@ -447,31 +489,61 @@ func (r *SecretSyncReconciler) computeSecretDataObjectHash(secretData map[string
 	return hmacHex, nil
 }
 
-// processIfSecretChanged checks if the secret sync object has changed.
-func (r *SecretSyncReconciler) processIfSecretChanged(oldObj, newObj client.Object) bool {
-	ssOldObj := oldObj.(*secretsyncv1alpha1.SecretSync)
-	ssNewObj := newObj.(*secretsyncv1alpha1.SecretSync)
-
-	return ssNewObj.Status.SyncHash != ssOldObj.Status.SyncHash
-}
-
-// We need to trigger the reconcile function when the secret sync object is created or updated, however
-// we don't need to trigger the reconcile function when the status of the secret sync object is updated.
+// shouldReconcilePredicate controls when reconciliation should occur
 func (r *SecretSyncReconciler) shouldReconcilePredicate() predicate.Funcs {
 	return predicate.Funcs{
 		CreateFunc: func(_ event.CreateEvent) bool {
 			return true
 		},
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			return r.processIfSecretChanged(e.ObjectOld, e.ObjectNew)
-		},
 		DeleteFunc: func(_ event.DeleteEvent) bool {
 			return false
 		},
 		GenericFunc: func(_ event.GenericEvent) bool {
-			return true
+			return false
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldSS := e.ObjectOld.(*secretsyncv1alpha1.SecretSync)
+			newSS := e.ObjectNew.(*secretsyncv1alpha1.SecretSync)
+
+			// Process if:
+			// 1. Spec changed (user updated the resource)
+			if !reflect.DeepEqual(oldSS.Spec, newSS.Spec) {
+				return true
+			}
+
+			// 2. Status.SyncHash was cleared (indicating refresh needed)
+			if oldSS.Status.SyncHash != "" && newSS.Status.SyncHash == "" {
+				return true
+			}
+
+			// 3. If LastSuccessfulSyncTime indicates refresh is due
+			if newSS.Spec.RefreshInterval != nil {
+				nextRefresh := calculateNextRefresh(newSS)
+				if time.Now().After(nextRefresh) {
+					return true
+				}
+			}
+
+			// Otherwise, skip reconciliation
+			return false
 		},
 	}
+}
+
+// calculateNextRefresh determines when the next refresh should occur
+func calculateNextRefresh(ss *secretsyncv1alpha1.SecretSync) time.Time {
+	// If no successful sync yet, refresh should happen immediately
+	if ss.Status.LastSuccessfulSyncTime == nil {
+		return time.Now()
+	}
+
+	// If no refresh interval set, no refresh needed
+	if ss.Spec.RefreshInterval == nil {
+		return time.Time{} // Zero time indicates no refresh needed
+	}
+
+	// Calculate next refresh time based on last successful sync plus interval
+	return ss.Status.LastSuccessfulSyncTime.Add(ss.Spec.RefreshInterval.Duration)
 }
 
 // SetupWithManager sets up the controller with the Manager.

@@ -118,6 +118,14 @@ type SecretSyncSpec struct {
 	// +kubebuilder:validation:Pattern=^[A-Za-z0-9]([-A-Za-z0-9]+([-._a-zA-Z0-9]?[A-Za-z0-9])*)?
 	// +optional
 	ForceSynchronization string `json:"forceSynchronization,omitempty"`
+
+	// RefreshInterval specifies the duration to wait between external secret refresh.
+	// If unspecified, the controller will not automatically refresh the secret.
+	// Minimum value is 10 seconds.
+	// +optional
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=^([0-9]+(\\.[0-9]+)?(s|m|h))+$
+	RefreshInterval *metav1.Duration `json:"refreshInterval,omitempty"`
 }
 
 // SecretSyncStatus defines the observed state of the secret synchronization process.
