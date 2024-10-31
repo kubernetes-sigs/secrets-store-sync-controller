@@ -24,8 +24,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/go-logr/logr"
+	"k8s.io/client-go/util/workqueue"
 	"os"
 	"reflect"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"slices"
 	"strings"
 	"time"
@@ -124,10 +126,9 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		err := r.reconcileSecretSync(ctx, ss)
 		if err != nil {
 			logger.Error(err, "reconciliation error")
-			//	// If there's an error, we might want to retry sooner
-			//	return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+			return ctrl.Result{}, err
 		}
-		return ctrl.Result{Requeue: false}, err
+		return ctrl.Result{}, nil
 	}
 
 	nextRefresh := calculateNextRefresh(ss)
@@ -551,5 +552,11 @@ func (r *SecretSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&secretsyncv1alpha1.SecretSync{}).
 		WithEventFilter(r.shouldReconcilePredicate()).
+		WithOptions(controller.Options{
+			RateLimiter: workqueue.NewItemExponentialFailureRateLimiter(
+				5*time.Second,  // base delay
+				10*time.Minute, // max delay
+			),
+		}).
 		Complete(r)
 }
