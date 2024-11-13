@@ -31,9 +31,9 @@ git checkout -b release-<NEW_VERSION>
 git commit -m "release: bump version to <NEW_VERSION>"
 git push origin release-<NEW_VERSION>
 
-# Building
+## Building
 
-## Docker Build and Push
+### Docker Build and Push
 
 The Dockerfile is located at `docker/Dockerfile`, which uses a multi-stage build process:
 
