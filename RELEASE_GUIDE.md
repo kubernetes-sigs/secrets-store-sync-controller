@@ -30,4 +30,48 @@ The following files need to be updated with the new version:
 git checkout -b release-<NEW_VERSION>
 git commit -m "release: bump version to <NEW_VERSION>"
 git push origin release-<NEW_VERSION>
+```
+
+## Building
+
+### Docker Build and Push
+
+The Dockerfile is located at `docker/Dockerfile`, which uses a multi-stage build process:
+
+- **Builder Stage**: Uses Golang as the base image to build the application.
+- **Final Stage**: Uses a Distroless image for minimal dependencies and security.
+
+To build and push the image:
+
+```bash
+cd docker
+make build-and-push
+```
+
+## Cloud Build
+
+### The docker/cloudbuild.yaml file configures the Cloud Build environment for multi-arch Docker images. Use this configuration to trigger a build with Google Cloud Build. Update _GIT_TAG and _PULL_BASE_REF as needed before running the job.
+
+```bash
+gcloud builds submit --config docker/cloudbuild.yaml
+```
+
+## Publishing
+
+### 1.Create a Git Tag: Tag the release branch with the new version.
+
+```bash
+git tag -a v<NEW_VERSION> -m "release: <NEW_VERSION>"
+git push origin --tags
+```
+
+### 2. Run Goreleaser: The .goreleaser.yml file is configured to categorize changes and create a release. Run Goreleaser to publish the release.
+
+```bash
+goreleaser release
+```
+
+### 3. Create GitHub Release: Once the tag is created, GitHub Actions should automatically generate the release notes and changelog based on the configuration in .goreleaser.yml
+
+
 
