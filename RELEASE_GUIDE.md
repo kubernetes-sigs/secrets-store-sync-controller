@@ -24,7 +24,7 @@ The following files need to be updated with the new version:
 4. **Cloud Build Configuration** (`docker/cloudbuild.yaml`): Update the `_GIT_TAG` and `_PULL_BASE_REF` substitutions if necessary.
 5. **Goreleaser Config** (`.goreleaser.yml`): Check `prerelease` and other release settings to ensure they align with the new release.
 
-After updating these files, commit and push your changes to create a pull request.
+## After updating these files, commit and push your changes to create a pull request.
 
 ```bash
 git checkout -b release-<NEW_VERSION>
