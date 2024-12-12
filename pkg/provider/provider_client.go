@@ -180,7 +180,7 @@ func (p *PluginClientBuilder) Cleanup() {
 
 	for k := range p.conns {
 		if err := p.conns[k].Close(); err != nil {
-			klog.ErrorS(err, "error shutting down provider connection", "provider", k)
+			klog.ErrorS(err, "Error shutting down provider connection", "provider", k)
 		}
 	}
 	p.clients = make(map[string]v1alpha1.CSIDriverProviderClient)
@@ -208,10 +208,10 @@ func (p *PluginClientBuilder) HealthCheck(ctx context.Context, interval time.Dur
 
 				runtimeVersion, err := Version(c, client)
 				if err != nil {
-					klog.V(5).ErrorS(err, "provider healthcheck failed", "provider", provider)
+					klog.V(5).ErrorS(err, "Provider healthcheck failed", "provider", provider)
 					continue
 				}
-				klog.V(5).InfoS("provider healthcheck successful", "provider", provider, "runtimeVersion", runtimeVersion)
+				klog.V(5).InfoS("Provider healthcheck successful", "provider", provider, "runtimeVersion", runtimeVersion)
 			}
 
 			p.lock.RUnlock()
@@ -248,7 +248,7 @@ func MountContent(ctx context.Context, client v1alpha1.CSIDriverProviderClient, 
 		}
 		return nil, nil, err
 	}
-	klog.V(5).Info("finished mount request")
+	klog.V(5).InfoS("Finished mount request")
 	if resp != nil && resp.GetError() != nil && len(resp.GetError().Code) > 0 {
 		return nil, nil, fmt.Errorf("mount request failed with provider error code %s", resp.GetError().Code)
 	}
@@ -266,7 +266,7 @@ func MountContent(ctx context.Context, client v1alpha1.CSIDriverProviderClient, 
 	// Individual k8s secrets are limited to 1MiB in size.
 	// Ref: https://kubernetes.io/docs/concepts/configuration/secret/#restrictions
 	if size := proto.Size(resp); size > 1048576 {
-		klog.InfoS("proto above 1MiB, secret sync may fail", "size", size)
+		klog.InfoS("Proto above 1MiB, secret sync may fail", "size", size)
 	}
 
 	files := make(map[string][]byte, len(resp.GetFiles()))
