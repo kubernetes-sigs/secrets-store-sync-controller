@@ -43,15 +43,16 @@ import (
 )
 
 var (
-	scheme                = runtime.NewScheme()
-	setupLog              = ctrl.Log.WithName("setup")
-	metricsAddr           = flag.String("metrics-bind-address", ":8085", "The address the metric endpoint binds to.")
-	enableLeaderElection  = flag.Bool("leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
-	probeAddr             = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	tokenRequestAudiences = flag.String("token-request-audience", "", "Audience for the token request, comma separated.")
-	providerVolumePath    = flag.String("provider-volume", "/provider", "Volume path for provider.")
-	maxCallRecvMsgSize    = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
-	versionInfo           = flag.Bool("version", false, "Print the version and exit")
+	scheme                  = runtime.NewScheme()
+	setupLog                = ctrl.Log.WithName("setup")
+	metricsAddr             = flag.String("metrics-bind-address", ":8085", "The address the metric endpoint binds to.")
+	enableLeaderElection    = flag.Bool("leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
+	leaderElectionNamespace = flag.String("leader-election-namespace", "", "Namespace for leader election")
+	probeAddr               = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
+	tokenRequestAudiences   = flag.String("token-request-audience", "", "Audience for the token request, comma separated.")
+	providerVolumePath      = flag.String("provider-volume", "/provider", "Volume path for provider.")
+	maxCallRecvMsgSize      = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
+	versionInfo             = flag.Bool("version", false, "Print the version and exit")
 )
 
 func init() {
@@ -88,9 +89,10 @@ func runMain() error {
 		Metrics: server.Options{
 			BindAddress: *metricsAddr,
 		},
-		HealthProbeBindAddress: *probeAddr,
-		LeaderElection:         *enableLeaderElection,
-		LeaderElectionID:       "29f1d54e.secret-sync.x-k8s.io",
+		HealthProbeBindAddress:  *probeAddr,
+		LeaderElection:          *enableLeaderElection,
+		LeaderElectionID:        "29f1d54e.secret-sync.x-k8s.io",
+		LeaderElectionNamespace: *leaderElectionNamespace,
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
