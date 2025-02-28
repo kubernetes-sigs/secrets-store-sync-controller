@@ -1,7 +1,25 @@
-# Deploying the Secrets Store Sync Controller
-You can deploy the Secrets Store Sync Controller with Helm using following command:
-```sh
-helm install -f values <path_to_values.yaml> secrets-store-sync-controller charts/secrets-store-sync-controller
+# secrets-store-sync-controller
+
+## Installation
+
+Quick start instructions for the setup and configuration of secrets-store-sync-controller using Helm.
+
+### Prerequisites
+
+- [Helm](https://helm.sh/docs/intro/quickstart/#install-helm)
+
+### Installing the chart
+
+#### Add the chart repo
+
+```bash
+helm repo add secrets-store-sync-controller https://kubernetes-sigs.github.io/secrets-store-sync-controller/charts
+```
+
+#### Install chart using Helm v3.0+
+
+```bash
+helm install secrets-sync-controller secrets-store-sync-controller/secrets-store-sync-controller
 ```
 
 ## Configuration and Parameters
