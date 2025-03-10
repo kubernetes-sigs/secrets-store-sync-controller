@@ -27,7 +27,7 @@ jobs:
         egress-policy: audit
     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.0.0
     - name: linkspector
-      uses: umbrelladocs/action-linkspector@7fbf24c6adceef216c594da7aa370c575aafcff1 # v1.0.0
+      uses: umbrelladocs/action-linkspector@de84085e0f51452a470558693d7d308fbb2fa261 # v1.2.5
 
       with:
         reporter: github-pr-review
