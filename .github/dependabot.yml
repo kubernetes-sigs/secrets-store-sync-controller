@@ -7,6 +7,7 @@ updates:
     commit-message:
       prefix: "chore"
     labels:
+      - "area/dependency"
       - "ok-to-test"
 
   - package-ecosystem: docker
@@ -16,6 +17,7 @@ updates:
     commit-message:
       prefix: "chore"
     labels:
+      - "area/dependency"
       - "ok-to-test"
 
   - package-ecosystem: "gomod"
@@ -25,6 +27,7 @@ updates:
     commit-message:
       prefix: "chore"
     labels:
+      - "area/dependency"
       - "ok-to-test"
 
   - package-ecosystem: "gomod"
@@ -44,4 +47,5 @@ updates:
         - "k8s.io/*"
         - "sigs.k8s.io/*"
     labels:
+      - "area/dependency"
       - "ok-to-test"
