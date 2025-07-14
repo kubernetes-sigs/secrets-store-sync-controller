@@ -108,7 +108,7 @@ type SecretSyncReconciler struct {
 
 func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Reconciling SecretSync", "namespace=", req.NamespacedName.String())
+	logger.Info("Reconciling SecretSync", "namespace", req.NamespacedName.String())
 
 	// get the secret sync object
 	ss := &secretsyncv1alpha1.SecretSync{}
@@ -180,7 +180,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	paramsJSON, err := json.Marshal(parameters)
 	if err != nil {
-		logger.Error(err, "failed to marshal parameters", "parameters", parameters)
+		logger.Error(err, "failed to marshal parameters")
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
 		return ctrl.Result{}, err
 	}
