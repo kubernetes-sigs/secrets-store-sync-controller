@@ -172,9 +172,12 @@ generate-kind-config:
 	if echo "$$K8S_VERSION" | grep -qE "^v1\.(26|27)\."; then \
 		FEATURE_GATES="ValidatingAdmissionPolicy: true"; \
 		RUNTIME_CONFIG="admissionregistration.k8s.io/v1alpha1: true"; \
-	elif echo "$$K8S_VERSION" | grep -qE "^v1\.(28|29)\."; then \
+	elif echo "$$K8S_VERSION" | grep -qE "^v1\.(28)\."; then \
 		FEATURE_GATES="ValidatingAdmissionPolicy: true"; \
 		RUNTIME_CONFIG="admissionregistration.k8s.io/v1beta1: true"; \
+	elif echo "$$K8S_VERSION" | grep -qE "^v1\.(29)\."; then \
+		FEATURE_GATES="ValidatingAdmissionPolicy: true"; \
+		RUNTIME_CONFIG="admissionregistration.k8s.io/v1: true"; \
 	else \
 		FEATURE_GATES=""; \
 		RUNTIME_CONFIG="admissionregistration.k8s.io/v1beta1: true"; \
