@@ -21,11 +21,11 @@ permissions:
 
 jobs:
   e2e-test:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       matrix:
-        KUBERNETES_VERSION: ["v1.28.13", "v1.29.8", "v1.30.4"]
+        KUBERNETES_VERSION: ["v1.30.13", "v1.31.9", "v1.32.5", "v1.33.1"]
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
@@ -47,7 +47,7 @@ jobs:
       - name: Setup Kind
         uses: engineerd/setup-kind@71e45b960fc8dd50b4aeabf6eb6ef2ca0920b4c1 # v0.6.2
         with:
-          version: "v0.23.0"
+          version: "v0.29.0"
           image: "kindest/node:${{ matrix.KUBERNETES_VERSION }}"
           config: "hack/localsetup/kind-config.yaml"
       - name: Test
