@@ -91,12 +91,13 @@ type AllClientBuilder interface {
 // SecretSyncReconciler reconciles a SecretSync object
 type SecretSyncReconciler struct {
 	client.Client
-	Audiences       []string
-	Clientset       kubernetes.Interface
-	Scheme          *runtime.Scheme
-	TokenClient     *k8s.TokenClient
-	ProviderClients AllClientBuilder
-	EventRecorder   record.EventRecorder
+	Audiences            []string
+	Clientset            kubernetes.Interface
+	Scheme               *runtime.Scheme
+	TokenClient          *k8s.TokenClient
+	ProviderClients      AllClientBuilder
+	EventRecorder        record.EventRecorder
+	RotationPollInterval time.Duration
 }
 
 //+kubebuilder:rbac:groups=secret-sync.x-k8s.io,resources=secretsyncs,verbs=get;list;watch
@@ -106,15 +107,25 @@ type SecretSyncReconciler struct {
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
-func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling SecretSync", "namespace", req.NamespacedName.String())
 
+	result = ctrl.Result{}
+
+	defer func() {
+		// Update the result
+		if r.RotationPollInterval > 0 {
+			logger.Info("re-enqueuing secret for next rotation", "NameSpacedName", req.NamespacedName, "RequeueAfter", r.RotationPollInterval)
+			result = ctrl.Result{RequeueAfter: r.RotationPollInterval}
+		}
+	}()
+
 	// get the secret sync object
 	ss := &secretsyncv1alpha1.SecretSync{}
-	if err := r.Get(ctx, req.NamespacedName, ss); err != nil {
+	if err = r.Get(ctx, req.NamespacedName, ss); err != nil {
 		logger.Error(err, "unable to fetch SecretSync")
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// update status conditions
@@ -132,12 +143,12 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := secretutil.ValidateSecretObject(secretName, secretObj); err != nil {
 		logger.Error(err, "failed to validate secret object", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	labels, annotations, err := r.prepareLabelsAndAnnotations(ctx, secretObj, ss, conditionType)
 	if err != nil {
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// get the service account token
@@ -152,7 +163,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, conditionReason, true)
 
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// get the secret provider class object
@@ -160,7 +171,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
 		logger.Error(err, "failed to get secret provider class", "name", ss.Spec.SecretProviderClassName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// this is to mimic the parameters sent from CSI driver to the provider
@@ -182,7 +193,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to marshal parameters")
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	providerName := string(spc.Spec.Provider)
@@ -190,7 +201,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to get provider client", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	secretRefData := make(map[string]string)
@@ -199,7 +210,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to marshal secret")
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	oldObjectVersions := make(map[string]string)
@@ -208,7 +219,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedProviderError, true)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	secretType := secretutil.GetSecretType(strings.TrimSpace(secretObj.Type))
@@ -216,14 +227,14 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
 		logger.Error(err, "failed to get secret data", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// Compute the hash of the secret
 	syncHash, err := r.computeSecretDataObjectHash(datamap, spc, ss)
 	if err != nil {
 		logger.Error(err, "failed to compute secret data object hash", "secretName", secretName)
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// Check if the hash has changed.
@@ -240,7 +251,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if len(failedCondition.Type) == 0 && !hashChanged {
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateNoValueChangeSucceeded, true)
-		return ctrl.Result{}, nil
+		return result, nil
 	}
 
 	if conditionType == ConditionTypeCreate {
@@ -280,7 +291,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonSecretPatchFailedUnknownError, true)
 		}
 
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	// No errors found, remove the failed conditions.
@@ -293,11 +304,11 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Update the status.
 	err = r.Client.Status().Update(ctx, ss)
 	if err != nil {
-		return ctrl.Result{}, err
+		return result, err
 	}
 
 	logger.V(4).Info("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
-	return ctrl.Result{}, nil
+	return result, nil
 }
 
 func (r *SecretSyncReconciler) prepareLabelsAndAnnotations(

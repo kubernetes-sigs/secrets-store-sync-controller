@@ -20,6 +20,7 @@ import (
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
@@ -53,6 +54,8 @@ var (
 	providerVolumePath      = flag.String("provider-volume", "/provider", "Volume path for provider.")
 	maxCallRecvMsgSize      = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
 	versionInfo             = flag.Bool("version", false, "Print the version and exit")
+	enableSecretRotation    = flag.Bool("enable-secret-rotation", false, "Enable secret rotation feature [alpha]")
+	rotationPollInterval    = flag.Duration("rotation-poll-interval", 2*time.Minute, "Secret rotation poll interval duration")
 )
 
 func init() {
@@ -116,14 +119,20 @@ func runMain() error {
 		audiences = []string{}
 	}
 
+	var reconcilerRotationPollInterval time.Duration
+	if *enableSecretRotation {
+		reconcilerRotationPollInterval = *rotationPollInterval
+	}
+
 	if err = (&controller.SecretSyncReconciler{
-		Clientset:       kubeClient,
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		TokenClient:     tokenClient,
-		ProviderClients: providerClients,
-		Audiences:       audiences,
-		EventRecorder:   record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
+		Clientset:            kubeClient,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		TokenClient:          tokenClient,
+		ProviderClients:      providerClients,
+		Audiences:            audiences,
+		EventRecorder:        record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
+		RotationPollInterval: reconcilerRotationPollInterval,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")
 		return err
