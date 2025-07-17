@@ -310,20 +310,13 @@ run-e2e-provider-tests:
 .PHONY: release-manifest
 release-manifest:
 	$(MAKE) manifests
-	@if [[ "$$(uname)" == "Darwin" ]]; then \
-		sed -i '' "s/version: .*/version: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i '' "s/appVersion: v .*/appVersion: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i '' "s/tag: v${CURRENTVERSION}/tag: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
-		sed -i '' "s/v${CURRENTVERSION}/v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/README.md; \
-	else \
-		sed -i "s/version: .*/version: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i "s/appVersion: v .*/appVersion: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml; \
-		sed -i "s/tag: v${CURRENTVERSION}/tag: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml; \
-		sed -i "s/v${CURRENTVERSION}/v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/README.md; \
-	fi
+	@sed -i "s/version: .*/version: ${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml
+	@sed -i "s/appVersion: .*/appVersion: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/Chart.yaml
+	@sed -i "s/tag: v${CURRENTVERSION}/tag: v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/values.yaml
+	@sed -i "s/v${CURRENTVERSION}/v${NEWVERSION}/" manifest_staging/charts/secrets-store-sync-controller/README.md
 
 .PHONY: promote-staging-manifest
 promote-staging-manifest: #promote staging manifests to release dir
 	$(MAKE) release-manifest
 	@rm -rf charts/secrets-store-sync-controller/
-	@cp -r manifest_staging/charts/ ./charts
+	@cp -r manifest_staging/charts/secrets-store-sync-controller ./charts
