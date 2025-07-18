@@ -10,7 +10,6 @@ logVerbosity: 5
 
 validatingAdmissionPolicies:
   applyPolicies: true
-  kubernetesReleaseVersion: "1.28.0"
   allowedSecretTypes:
     - "Opaque"
     - "kubernetes.io/basic-auth"
