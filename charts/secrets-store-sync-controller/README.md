@@ -1,7 +1,25 @@
-# Deploying the Secrets Store Sync Controller
-You can deploy the Secrets Store Sync Controller with Helm using following command:
-```sh
-helm install -f values <path_to_values.yaml> secrets-store-sync-controller charts/secrets-store-sync-controller
+# secrets-store-sync-controller
+
+## Installation
+
+Quick start instructions for the setup and configuration of secrets-store-sync-controller using Helm.
+
+### Prerequisites
+
+- [Helm](https://helm.sh/docs/intro/quickstart/#install-helm)
+
+### Installing the chart
+
+#### Add the chart repo
+
+```bash
+helm repo add secrets-store-sync-controller https://kubernetes-sigs.github.io/secrets-store-sync-controller/charts
+```
+
+#### Install chart using Helm v3.0+
+
+```bash
+helm install secrets-sync-controller secrets-store-sync-controller/secrets-store-sync-controller
 ```
 
 ## Configuration and Parameters
@@ -18,7 +36,7 @@ You can customize the installation by modifying values in the `values.yaml` file
 | `validatingAdmissionPolicies.deniedSecretTypes`  | The types of secrets that the Secrets Store Sync Controller should deny.                          | `["kubernetes.io/service-account-token"]`                                                                                                                                             |
 | `image.repository`                               | The image repository of the Secrets Store Sync Controller.                                        | `registry.k8s.io/secrets-store-sync/controller`                                                                                                                                       |
 | `image.pullPolicy`                               | Image pull policy.                                                                                | `IfNotPresent`                                                                                                                                                                        |
-| `image.tag`                                      | The specific image tag to use. Overrides the image tag whose default is the chart's `appVersion`. | `v0.0.1`                                                                                                                                                                              |
+| `image.tag`                                      | The specific image tag to use. Overrides the image tag whose default is the chart's `appVersion`. | `v0.0.2`                                                                                                                                                                              |
 | `securityContext`                                | Security context for the Secrets Store Sync Controller.                                           | `{ allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }`                                                                                                                  |
 | `resources`                                      | The resource request/limits for the Secrets Store Sync Controller image.                          | `limits: 500m CPU, 128Mi; requests: 10m CPU, 64Mi`                                                                                                                                    |
 | `podAnnotations`                                 | Annotations to be added to pods.                                                                  | `{ kubectl.kubernetes.io/default-container: "manager" }`                                                                                                                              |
