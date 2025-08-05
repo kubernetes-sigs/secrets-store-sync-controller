@@ -21,7 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"k8s.io/klog/v2"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 )
@@ -89,14 +89,12 @@ var AllowedStringsToDisplayConditionErrorMessage = []string{
 }
 
 func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, oldConditionType string, newConditionType string, conditionReason string, shouldUpdateStatus bool) {
-	logger := log.FromContext(ctx)
-
 	if ss.Status.Conditions == nil {
 		ss.Status.Conditions = []metav1.Condition{}
 	}
 
 	if len(oldConditionType) > 0 {
-		logger.V(10).Info("Removing old condition", "oldConditionType", oldConditionType)
+		klog.V(10).InfoS("Removing old condition", "oldConditionType", oldConditionType)
 		meta.RemoveStatusCondition(&ss.Status.Conditions, oldConditionType)
 	}
 
@@ -164,7 +162,7 @@ func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *s
 		condition.Message = ConditionMessageUnknown
 	}
 
-	logger.V(10).Info("Adding new condition", "newConditionType", newConditionType, "conditionReason", conditionReason)
+	klog.V(10).InfoS("Adding new condition", "newConditionType", newConditionType, "conditionReason", conditionReason)
 	meta.SetStatusCondition(&ss.Status.Conditions, condition)
 
 	if !shouldUpdateStatus {
@@ -172,8 +170,8 @@ func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *s
 	}
 
 	if err := r.Client.Status().Update(ctx, ss); err != nil {
-		logger.Error(err, "Failed to update status", "condition", condition)
+		klog.ErrorS(err, "Failed to update status", "condition", condition)
 	}
 
-	logger.V(10).Info("Updated status", "condition", condition)
+	klog.V(10).InfoS("Updated status", "condition", condition)
 }
