@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 	"strings"
@@ -28,6 +29,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
+	"monis.app/mlog"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -44,7 +47,6 @@ import (
 
 var (
 	scheme                  = runtime.NewScheme()
-	setupLog                = ctrl.Log.WithName("setup")
 	metricsAddr             = flag.String("metrics-bind-address", ":8085", "The address the metric endpoint binds to.")
 	enableLeaderElection    = flag.Bool("leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
 	leaderElectionNamespace = flag.String("leader-election-namespace", "", "Namespace for leader election")
@@ -53,6 +55,7 @@ var (
 	providerVolumePath      = flag.String("provider-volume", "/provider", "Volume path for provider.")
 	maxCallRecvMsgSize      = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
 	versionInfo             = flag.Bool("version", false, "Print the version and exit")
+	logFormatJSON           = flag.Bool("log-format-json", false, "set log formatter to json")
 )
 
 func init() {
@@ -65,18 +68,31 @@ func init() {
 }
 
 func runMain() error {
+	klog.InitFlags(nil)
 	opts := zap.Options{
 		Development: true,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
+	ctx := withShutdownSignal(context.Background())
+
+	defer mlog.Setup()()
+	format := mlog.FormatText
+	if *logFormatJSON {
+		format = mlog.FormatJSON
+	}
+	if err := mlog.ValidateAndSetKlogLevelAndFormatGlobally(ctx, getKlogLevel(), format); err != nil {
+		mlog.Error("failed to validate log level", err)
+		return err
+	}
+
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	if *versionInfo {
 		versionErr := version.PrintVersion()
 		if versionErr != nil {
-			setupLog.Error(versionErr, "failed to print version")
+			klog.ErrorS(versionErr, "failed to print version")
 			return versionErr
 		}
 		return nil
@@ -95,7 +111,7 @@ func runMain() error {
 		LeaderElectionNamespace: *leaderElectionNamespace,
 	})
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
+		klog.ErrorS(err, "unable to start manager")
 		return err
 	}
 
@@ -125,27 +141,47 @@ func runMain() error {
 		Audiences:       audiences,
 		EventRecorder:   record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")
+		klog.ErrorS(err, "unable to create controller", "controller", "SecretSync")
 		return err
 	}
 	//+kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
+		klog.ErrorS(err, "unable to set up health check")
 		return err
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+		klog.ErrorS(err, "unable to set up ready check")
 		return err
 	}
 
-	setupLog.Info("starting manager")
+	klog.InfoS("starting manager")
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
+		klog.ErrorS(err, "problem running manager")
 		return err
 	}
 
 	return nil
+}
+
+// withShutdownSignal returns a copy of the parent context that will close if
+// the process receives termination signals.
+func withShutdownSignal(ctx context.Context) context.Context {
+	nctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	return nctx
+}
+
+func getKlogLevel() klog.Level {
+	// hack around klog not exposing a Get method
+	for i := klog.Level(0); i < 1_000_000; i++ {
+		if klog.V(i).Enabled() {
+			continue
+		}
+		return i - 1
+	}
+
+	return -1
 }
 
 func main() {
