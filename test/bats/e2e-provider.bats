@@ -139,6 +139,21 @@ SLEEP_TIME=1
     "$expected_message"
 }
 
+@test "Validate metrics" {
+  kubectl create ns metrics
+  curl_pod_name=curl-$(openssl rand -hex 5)
+  kubectl run "${curl_pod_name}" -n metrics --image=curlimages/curl:7.75.0 --labels="test=metrics" -- tail -f /dev/null
+  kubectl wait -n metrics --for=condition=Ready --timeout=60s pod "${curl_pod_name}"
+  for pod_ip in $(kubectl get pod -n secrets-store-sync-controller-system -l app=secrets-store-sync-controller -o jsonpath="{.items[0].status.podIP}")
+  do
+    run kubectl exec "${curl_pod_name}" -n metrics -- curl http://"${pod_ip}":8085/metrics
+    assert_match "secrets_store_sync_controller_reconcile_total" "${output}"
+    assert_match "secrets_store_sync_controller_reconcile_errors_total" "${output}"
+  done
+  # delete metrics namespace
+  kubectl delete ns metrics
+}
+
 teardown_file() {
   archive_provider "app=secrets-store-sync-controller" || true
   archive_info || true

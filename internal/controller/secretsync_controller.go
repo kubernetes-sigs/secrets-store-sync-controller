@@ -46,6 +46,7 @@ import (
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/metrics"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/util/secretutil"
 )
@@ -106,14 +107,28 @@ type SecretSyncReconciler struct {
 //+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
-func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
 	logger := log.FromContext(ctx)
 	logger.Info("Reconciling SecretSync", "namespace", req.NamespacedName.String())
+	startTime := time.Now()
+	var providerName string
+	// TODO : Create a list of errors similar to https://github.com/kubernetes-sigs/secrets-store-csi-driver/blob/main/pkg/errors/errors.go
+	var errorType string
+
+	defer func() {
+		metrics.ReconcileTotal.WithLabelValues().Inc()
+		if err == nil {
+			metrics.ReconcileDuration.WithLabelValues().Observe(time.Since(startTime).Seconds())
+		} else {
+			metrics.ReconcileErrorsTotal.WithLabelValues(errorType).Inc()
+		}
+	}()
 
 	// get the secret sync object
 	ss := &secretsyncv1alpha1.SecretSync{}
 	if err := r.Get(ctx, req.NamespacedName, ss); err != nil {
 		logger.Error(err, "unable to fetch SecretSync")
+		errorType = "SecretSyncNotFound"
 		return ctrl.Result{}, err
 	}
 
@@ -132,11 +147,13 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := secretutil.ValidateSecretObject(secretName, secretObj); err != nil {
 		logger.Error(err, "failed to validate secret object", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
+		errorType = ConditionReasonUserInputValidationFailed
 		return ctrl.Result{}, err
 	}
 
 	labels, annotations, err := r.prepareLabelsAndAnnotations(ctx, secretObj, ss, conditionType)
 	if err != nil {
+		errorType = "InvalidLabelOrAnnotation"
 		return ctrl.Result{}, err
 	}
 
@@ -151,7 +168,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, conditionReason, true)
-
+		errorType = conditionReason
 		return ctrl.Result{}, err
 	}
 
@@ -160,6 +177,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
 		logger.Error(err, "failed to get secret provider class", "name", ss.Spec.SecretProviderClassName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
+		errorType = ConditionTypeUnknown
 		return ctrl.Result{}, err
 	}
 
@@ -182,14 +200,16 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to marshal parameters")
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
+		errorType = ConditionReasonControllerInternalError
 		return ctrl.Result{}, err
 	}
 
-	providerName := string(spc.Spec.Provider)
+	providerName = string(spc.Spec.Provider)
 	providerClient, err := r.ProviderClients.Get(ctx, providerName)
 	if err != nil {
 		logger.Error(err, "failed to get provider client", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
+		errorType = ConditionReasonControllerSpcError
 		return ctrl.Result{}, err
 	}
 
@@ -199,6 +219,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to marshal secret")
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
+		errorType = ConditionReasonControllerInternalError
 		return ctrl.Result{}, err
 	}
 
@@ -208,6 +229,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if err != nil {
 		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedProviderError, true)
+		errorType = ConditionReasonFailedProviderError
 		return ctrl.Result{}, err
 	}
 
@@ -216,6 +238,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
 		logger.Error(err, "failed to get secret data", "secretName", secretName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
+		errorType = ConditionReasonUserInputValidationFailed
 		return ctrl.Result{}, err
 	}
 
@@ -223,6 +246,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	syncHash, err := r.computeSecretDataObjectHash(datamap, spc, ss)
 	if err != nil {
 		logger.Error(err, "failed to compute secret data object hash", "secretName", secretName)
+		errorType = ConditionReasonControllerInternalError
 		return ctrl.Result{}, err
 	}
 
@@ -276,8 +300,10 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
 			failedCondition.Message = err.Error()
 			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonValidatingAdmissionPolicyCheckFailed, true)
+			errorType = ConditionReasonValidatingAdmissionPolicyCheckFailed
 		} else {
 			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonSecretPatchFailedUnknownError, true)
+			errorType = ConditionReasonSecretPatchFailedUnknownError
 		}
 
 		return ctrl.Result{}, err
