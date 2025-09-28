@@ -20,6 +20,10 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// DecodeStrategy defines possible secret value decoding strategies
+// +kubebuilder:validation:Enum=None;Base64
+type DecodeStrategy string
+
 // SecretObjectData defines the desired state of synchronized data within a Kubernetes secret object.
 type SecretObjectData struct {
 	// sourcePath is the data source value of the secret defined in the Secret Provider Class.
@@ -37,6 +41,11 @@ type SecretObjectData struct {
 	// +kubebuilder:validation:Pattern=^[A-Za-z0-9.]([-A-Za-z0-9]+([-._a-zA-Z0-9]?[A-Za-z0-9])*)?(\/([0-9]+))*$
 	// +kubebuilder:validation:Required
 	TargetKey string `json:"targetKey"`
+
+	// +optional
+	// Used to define a decoding Strategy
+	// +kubebuilder:default="None"
+	DecodeStrategy DecodeStrategy `json:"decodeStrategy,omitempty"`
 }
 
 // SecretObject defines the desired state of synchronized Kubernetes secret objects.
