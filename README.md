@@ -97,8 +97,9 @@ spec:
  secretObject:
   type: Opaque
   data:
-  - sourcePath: foo # name of the object in the SecretProviderClass
-    targetKey:  bar # name of the key in the Kubernetes secret
+  - sourcePath: foo         # name of the object in the SecretProviderClass
+    targetKey:  bar         # name of the key in the Kubernetes secret
+    decodeStrategy: Base64  # (optional) Type of decoding to perform on data returned from the provider; default is "None"
 EOF
 ```
 

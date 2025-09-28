@@ -372,6 +372,40 @@ func TestGetSecretData(t *testing.T) {
 			},
 		},
 		{
+			name: "file matching object found in fs and not decoded",
+			secretObjData: []secretsyncv1alpha1.SecretObjectData{
+				{
+					SourcePath:     "foo",
+					TargetKey:      "bar",
+					DecodeStrategy: "None",
+				},
+			},
+			secretType: corev1.SecretTypeOpaque,
+			currentFiles: map[string][]byte{
+				"foo": []byte("test"),
+			},
+			expectedDataMap: map[string][]byte{
+				"bar": []byte("test"),
+			},
+		},
+		{
+			name: "file matching object found in fs and decoded",
+			secretObjData: []secretsyncv1alpha1.SecretObjectData{
+				{
+					SourcePath:     "foo",
+					TargetKey:      "bar",
+					DecodeStrategy: "Base64",
+				},
+			},
+			secretType: corev1.SecretTypeOpaque,
+			currentFiles: map[string][]byte{
+				"foo": []byte("dGVzdA=="),
+			},
+			expectedDataMap: map[string][]byte{
+				"bar": []byte("test"),
+			},
+		},
+		{
 			name: "file matching object found in fs after trimming spaces in object name",
 			secretObjData: []secretsyncv1alpha1.SecretObjectData{
 				{

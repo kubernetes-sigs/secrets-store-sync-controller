@@ -21,6 +21,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"math"
@@ -195,10 +196,22 @@ func GetSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretTy
 		if len(dataKey) == 0 {
 			return datamap, fmt.Errorf("target key in secretObject.data is empty")
 		}
-		content, ok := files[sourcePath]
+
+		_content, ok := files[sourcePath]
 		if !ok {
 			return datamap, fmt.Errorf("file matching sourcePath %s not found in the pod", sourcePath)
 		}
+
+		var content = _content
+		if data.DecodeStrategy == "Base64" {
+			content = make([]byte, base64.StdEncoding.DecodedLen(len(_content)))
+			n, err := base64.StdEncoding.Decode(content, _content)
+			if err != nil {
+				return datamap, fmt.Errorf("failed to base64 decode value %s: %w", _content, err)
+			}
+			content = content[:n] // Trim padding
+		}
+
 		datamap[dataKey] = content
 		if secretType == corev1.SecretTypeTLS {
 			c, err := GetCertPart(content, dataKey)
