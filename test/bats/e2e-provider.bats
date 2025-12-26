@@ -139,6 +139,52 @@ SLEEP_TIME=1
     "$expected_message"
 }
 
+@test "[v1alpha1] validate secret creation with syncInterval configured" {
+  create_namespace test-sync-interval
+
+  # Create the SPC
+  kubectl apply -n test-sync-interval -f $BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml
+
+  cmd="kubectl get secretproviderclasses.secrets-store.csi.x-k8s.io/e2e-providerspc -n test-sync-interval -o yaml | grep e2e-providerspc"
+  wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+  # Create the SecretSync with syncInterval
+  kubectl apply -n test-sync-interval -f $BATS_RESOURCE_YAML_DIR/sync_interval_secretsync.yaml
+
+  cmd="kubectl get secretsyncs.secret-sync.x-k8s.io/sse2esyncintervalsecret -n test-sync-interval -o yaml | grep sse2esyncintervalsecret"
+  wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+  # Verify the syncInterval is set in the spec
+  sync_interval=$(kubectl get secretsync sse2esyncintervalsecret -n test-sync-interval -o jsonpath='{.spec.syncInterval}')
+  [ "$sync_interval" = "1m" ]
+
+  # Retrieve the secret - should be created immediately on first sync
+  cmd="kubectl get secret sse2esyncintervalsecret -n test-sync-interval -o yaml | grep 'apiVersion: secret-sync.x-k8s.io/v1alpha1'"
+  wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+  # Check the data in the secret
+  expected_data="secret"
+  secret_data=$(kubectl get secret sse2esyncintervalsecret -n test-sync-interval -o jsonpath='{.data.bar}' | base64 --decode)
+  [ "$secret_data" = "$expected_data" ]
+
+  # Verify status condition shows successful creation
+  cmd="kubectl get secretsync sse2esyncintervalsecret -n test-sync-interval -o jsonpath='{.status.conditions[?(@.type==\"Create\")].reason}' | grep CreateSucceeded"
+  wait_for_process $WAIT_TIME $SLEEP_TIME "$cmd"
+
+  # Verify lastSuccessfulSyncTime is set
+  last_sync_time=$(kubectl get secretsync sse2esyncintervalsecret -n test-sync-interval -o jsonpath='{.status.lastSuccessfulSyncTime}')
+  [ -n "$last_sync_time" ]
+
+  # Delete the SecretSync
+  kubectl delete secretsync sse2esyncintervalsecret -n test-sync-interval
+
+  # Check that the secret is deleted
+  cmd="kubectl get secret sse2esyncintervalsecret -n test-sync-interval"
+  wait_for_process $WAIT_TIME $SLEEP_TIME "! $cmd"
+
+  kubectl delete namespace test-sync-interval
+}
+
 teardown_file() {
   archive_provider "app=secrets-store-sync-controller" || true
   archive_info || true
