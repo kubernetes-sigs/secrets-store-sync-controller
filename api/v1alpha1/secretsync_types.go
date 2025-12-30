@@ -125,7 +125,8 @@ type SecretSyncSpec struct {
 	// +kubebuilder:validation:Pattern=^([0-9]+(\\.[0-9]+)?(s|m|h))+$
 	// +kubebuilder:validation:Type=string
 	// +optional
-	SyncInterval string `json:"syncInterval,omitempty"`}
+	SyncInterval string `json:"syncInterval,omitempty"`
+}
 
 // SecretSyncStatus defines the observed state of the secret synchronization process.
 type SecretSyncStatus struct {
