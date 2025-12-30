@@ -272,6 +272,17 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if len(failedCondition.Type) == 0 && !hashChanged {
+		// No failed conditions and no hash changes - check if we should do periodic sync
+		// Only check sync interval if there's nothing else triggering a sync
+		if syncInterval > 0 && ss.Status.LastSuccessfulSyncTime != nil {
+			timeSinceLastSync := time.Since(ss.Status.LastSuccessfulSyncTime.Time)
+			if timeSinceLastSync < syncInterval {
+				// Not enough time has passed, skip sync and requeue for remaining duration
+				remainingTime := syncInterval - timeSinceLastSync
+				logger.V(4).Info("Sync interval not elapsed, skipping sync", "timeSinceLastSync", timeSinceLastSync, "remainingTime", remainingTime)
+				return ctrl.Result{RequeueAfter: remainingTime}, nil
+			}
+		}
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateNoValueChangeSucceeded, true)
 		// Requeue after the sync interval if configured for periodic polling
 		if syncInterval > 0 {
