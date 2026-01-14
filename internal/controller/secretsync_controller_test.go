@@ -634,7 +634,7 @@ func newSecretSyncReconciler(
 	providerClients := provider.NewPluginClientBuilder([]string{socketPath})
 
 	// Create a ReconcileSecretSync object with the scheme and fake client
-	kubeClient := fakeclient.NewSimpleClientset(testSecret)
+	kubeClient := fakeclient.NewClientset(testSecret)
 	ssc := &SecretSyncReconciler{
 		Client:          ctrlClient,
 		Clientset:       kubeClient,
