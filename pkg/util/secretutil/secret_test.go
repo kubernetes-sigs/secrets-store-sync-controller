@@ -19,12 +19,10 @@ package secretutil
 import (
 	"encoding/base64"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 )
@@ -203,109 +201,6 @@ func TestGetCert(t *testing.T) {
 		actual, err := GetCertPart([]byte(tc.data()), tc.part)
 		assert.Equal(t, tc.expectedErr, err != nil)
 		assert.Equal(t, tc.expected, actual)
-	}
-}
-
-func TestValidateSecretObject(t *testing.T) {
-	tests := []struct {
-		name                string
-		secretSync          *secretsyncv1alpha1.SecretSync
-		expectedErrorString string
-	}{
-		{
-			name: "secret name is empty",
-			secretSync: &secretsyncv1alpha1.SecretSync{
-				ObjectMeta: metav1.ObjectMeta{
-					Namespace: "default",
-				},
-				Spec: secretsyncv1alpha1.SecretSyncSpec{
-					ServiceAccountName:      "default",
-					SecretProviderClassName: "test-spc",
-					SecretObject: secretsyncv1alpha1.SecretObject{
-						Type: "Opaque",
-						Data: []secretsyncv1alpha1.SecretObjectData{
-							{
-								SourcePath: "foo",
-								TargetKey:  "bar",
-							},
-						},
-					},
-				},
-			},
-			expectedErrorString: "secret name is empty",
-		},
-		{
-			name: "secret type is empty",
-			secretSync: &secretsyncv1alpha1.SecretSync{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "default",
-				},
-				Spec: secretsyncv1alpha1.SecretSyncSpec{
-					ServiceAccountName:      "default",
-					SecretProviderClassName: "test-spc",
-					SecretObject: secretsyncv1alpha1.SecretObject{
-						Data: []secretsyncv1alpha1.SecretObjectData{
-							{
-								SourcePath: "foo",
-								TargetKey:  "bar",
-							},
-						},
-					},
-				},
-			},
-			expectedErrorString: "secret type is empty",
-		},
-		{
-			name: "data is empty",
-			secretSync: &secretsyncv1alpha1.SecretSync{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "default",
-				},
-				Spec: secretsyncv1alpha1.SecretSyncSpec{
-					ServiceAccountName:      "default",
-					SecretProviderClassName: "test-spc",
-					SecretObject: secretsyncv1alpha1.SecretObject{
-						Type: "Opaque",
-					},
-				},
-			},
-			expectedErrorString: "data is empty",
-		},
-		{
-			name: "valid secret object",
-			secretSync: &secretsyncv1alpha1.SecretSync{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-secret",
-					Namespace: "default",
-				},
-				Spec: secretsyncv1alpha1.SecretSyncSpec{
-					ServiceAccountName:      "default",
-					SecretProviderClassName: "test-spc",
-					SecretObject: secretsyncv1alpha1.SecretObject{
-						Type: "Opaque",
-						Data: []secretsyncv1alpha1.SecretObjectData{
-							{
-								SourcePath: "foo",
-								TargetKey:  "bar",
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			err := ValidateSecretObject(strings.TrimSpace(test.secretSync.Name), test.secretSync.Spec.SecretObject)
-			if len(test.expectedErrorString) > 0 {
-				if err == nil || err.Error() != test.expectedErrorString {
-					t.Fatalf("expected err: %+v, got: %+v", test.expectedErrorString, err)
-				}
-			}
-		})
 	}
 }
 

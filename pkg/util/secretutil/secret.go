@@ -166,21 +166,6 @@ func GetSecretType(sType string) corev1.SecretType {
 	return corev1.SecretType(sType)
 }
 
-// ValidateSecretObject performs basic validation of the secret provider class
-// secret object to check if the mandatory fields - name, type and data are defined
-func ValidateSecretObject(secretName string, secretObj secretsyncv1alpha1.SecretObject) error {
-	if len(secretName) == 0 {
-		return fmt.Errorf("secret name is empty")
-	}
-	if len(secretObj.Type) == 0 {
-		return fmt.Errorf("secret type is empty")
-	}
-	if len(secretObj.Data) == 0 {
-		return fmt.Errorf("data is empty")
-	}
-	return nil
-}
-
 // GetSecretData gets the object contents from the pods target path and returns a
 // map that will be populated in the Kubernetes secret data field
 func GetSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretType corev1.SecretType, files map[string][]byte) (map[string][]byte, error) {
