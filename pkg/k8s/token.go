@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 
 	authenticationv1 "k8s.io/api/authentication/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 
@@ -96,10 +95,4 @@ func (c *TokenClient) SecretProviderServiceAccountTokenAttrs(namespace, serviceA
 // * If refresh fails and the old token is no longer valid, return an error
 func (c *TokenClient) GetServiceAccountToken(namespace, name string, tr *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
 	return c.manager.GetServiceAccountToken(namespace, name, tr)
-}
-
-// DeleteServiceAccountToken should be invoked when pod got deleted. It simply
-// clean token manager cache.
-func (c *TokenClient) DeleteServiceAccountToken(podUID types.UID) {
-	c.manager.DeleteServiceAccountToken(podUID)
 }
