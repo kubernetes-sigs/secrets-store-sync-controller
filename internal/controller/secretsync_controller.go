@@ -268,12 +268,11 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeCreate)
 		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeUpdate)
 
+		cond := ConditionReasonSecretPatchFailedUnknownError
 		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
-			failedCondition.Message = err.Error()
-			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonValidatingAdmissionPolicyCheckFailed, true)
-		} else {
-			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonSecretPatchFailedUnknownError, true)
+			cond = ConditionReasonValidatingAdmissionPolicyCheckFailed
 		}
+		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, cond, true)
 
 		return ctrl.Result{}, err
 	}
