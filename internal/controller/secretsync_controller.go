@@ -23,6 +23,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -130,7 +131,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	secretName := strings.TrimSpace(ss.Name)
 	secretObj := ss.Spec.SecretObject
 
-	labels, annotations, err := r.prepareLabelsAndAnnotations(ctx, secretObj, ss, conditionType)
+	err := r.validateLabelsAnnotations(ctx, secretObj, ss, conditionType)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -257,7 +258,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Attempt to create or update the secret.
-	if err = r.serverSidePatchSecret(ctx, ss, secretName, req.Namespace, datamap, objectVersions, labels, annotations, secretType); err != nil {
+	if err = r.serverSidePatchSecret(ctx, ss, secretName, req.Namespace, datamap, objectVersions, secretObj.Labels, secretObj.Annotations, secretType); err != nil {
 		logger.Error(err, "failed to patch secret", "secretName", secretName)
 
 		// Rollback to the previous hash and the previous last successful sync time.
@@ -294,35 +295,23 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
-func (r *SecretSyncReconciler) prepareLabelsAndAnnotations(
+func (r *SecretSyncReconciler) validateLabelsAnnotations(
 	ctx context.Context,
 	secretObj secretsyncv1alpha1.SecretObject,
 	ss *secretsyncv1alpha1.SecretSync,
 	conditionType string,
-) (map[string]string, map[string]string, error) {
-	labels := make(map[string]string)
-	for k, v := range secretObj.Labels {
-		labels[k] = v
-	}
-
-	if val, ok := labels[ControllerLabelKey]; ok && len(val) > 0 {
+) error {
+	if val, ok := secretObj.Labels[ControllerLabelKey]; ok && len(val) > 0 {
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedInvalidLabelError, true)
-		return nil, nil, fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", ControllerLabelKey)
-	}
-	labels[ControllerLabelKey] = ""
-
-	annotations := make(map[string]string)
-	for k, v := range secretObj.Annotations {
-		annotations[k] = v
+		return fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", ControllerLabelKey)
 	}
 
-	if val, ok := annotations[ControllerAnnotationKey]; ok && len(val) > 0 {
+	if _, ok := secretObj.Annotations[ControllerAnnotationKey]; ok {
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedInvalidAnnotationError, true)
-		return nil, nil, fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", ControllerAnnotationKey)
+		return fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", ControllerAnnotationKey)
 	}
-	annotations[ControllerAnnotationKey] = ""
 
-	return labels, annotations, nil
+	return nil
 }
 
 // checkIfErrorMessageCanBeDisplayed checks if the error message can be displayed in the condition message
@@ -339,22 +328,22 @@ func checkIfErrorMessageCanBeDisplayed(errorMessage string) bool {
 // serverSidePatchSecret performs a server-side patch on a Kubernetes Secret.
 // It updates the specified secret with the provided data, labels, and annotations.
 func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, name, namespace string, datamap map[string][]byte, _, labels, annotations map[string]string, secretType corev1.SecretType) (err error) {
-	secretKind := "Secret"
-	secretVersion := "v1"
-
-	// Retrieve Kubernetes clientset.
-	coreV1Client := r.Clientset.CoreV1()
+	controllerLabels := maps.Clone(labels)
+	if controllerLabels == nil {
+		controllerLabels = make(map[string]string, 1)
+	}
+	controllerLabels[ControllerLabelKey] = ""
 
 	// Construct the patch for updating the Secret.
 	secretPatchData := corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       secretKind,
-			APIVersion: secretVersion,
+			Kind:       "Secret",
+			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        name,
 			Namespace:   namespace,
-			Labels:      labels,
+			Labels:      controllerLabels,
 			Annotations: annotations,
 			OwnerReferences: []metav1.OwnerReference{
 				{
@@ -375,7 +364,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 	}
 
 	// Perform the server-side patch on the Secret.
-	_, err = coreV1Client.Secrets(namespace).Patch(ctx, name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: SecretSyncControllerFieldManager})
+	_, err = r.Clientset.CoreV1().Secrets(namespace).Patch(ctx, name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: SecretSyncControllerFieldManager})
 	if err != nil {
 		return err
 	}
