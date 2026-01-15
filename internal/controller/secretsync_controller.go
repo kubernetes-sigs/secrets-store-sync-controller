@@ -206,7 +206,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	secretType := secretutil.GetSecretType(strings.TrimSpace(secretObj.Type))
+	secretType := corev1.SecretType(secretObj.Type)
 	var datamap map[string][]byte
 	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
 		logger.Error(err, "failed to get secret data", "secretName", secretName)
