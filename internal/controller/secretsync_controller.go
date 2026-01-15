@@ -23,7 +23,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"os"
 	"slices"
 	"strings"
@@ -203,8 +202,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	oldObjectVersions := make(map[string]string)
-
-	objectVersions, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
+	_, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
 	if err != nil {
 		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
 		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedProviderError, true)
@@ -262,7 +260,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Attempt to create or update the secret.
-	if err = r.serverSidePatchSecret(ctx, ss, secretName, req.Namespace, datamap, objectVersions, secretObj.Labels, secretObj.Annotations, secretType); err != nil {
+	if err = r.serverSidePatchSecret(ctx, ss, datamap, secretType); err != nil {
 		logger.Error(err, "failed to patch secret", "secretName", secretName)
 
 		// Rollback to the previous hash and the previous last successful sync time.
@@ -331,12 +329,11 @@ func checkIfErrorMessageCanBeDisplayed(errorMessage string) bool {
 
 // serverSidePatchSecret performs a server-side patch on a Kubernetes Secret.
 // It updates the specified secret with the provided data, labels, and annotations.
-func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, name, namespace string, datamap map[string][]byte, _, labels, annotations map[string]string, secretType corev1.SecretType) (err error) {
-	// copy the object to make sure no client calls below would ever cause mutation
-	// in our cache
+func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, datamap map[string][]byte, secretType corev1.SecretType) (err error) {
+	// copy the object to make sure no code below mutates our cache
 	ssCopy := ss.DeepCopy()
 
-	controllerLabels := maps.Clone(labels)
+	controllerLabels := ssCopy.Spec.SecretObject.Labels
 	if controllerLabels == nil {
 		controllerLabels = make(map[string]string, 1)
 	}
@@ -349,10 +346,10 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   namespace,
+			Name:        ssCopy.Name,
+			Namespace:   ssCopy.Namespace,
 			Labels:      controllerLabels,
-			Annotations: annotations,
+			Annotations: ssCopy.Spec.SecretObject.Annotations,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: ssCopy.APIVersion,
@@ -372,7 +369,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 	}
 
 	// Perform the server-side patch on the Secret.
-	_, err = r.Clientset.CoreV1().Secrets(namespace).Patch(ctx, name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: SecretSyncControllerFieldManager})
+	_, err = r.Clientset.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: SecretSyncControllerFieldManager})
 	if err != nil {
 		return err
 	}
