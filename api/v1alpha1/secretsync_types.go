@@ -44,9 +44,9 @@ type SecretObject struct {
 	// type specifies the type of the Kubernetes secret object,
 	// e.g. "Opaque";"kubernetes.io/basic-auth";"kubernetes.io/ssh-auth";"kubernetes.io/tls"
 	// The controller must have permission to create secrets of the specified type.
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Required
+	// +kubebuilder:default:=Opaque
+	// +kubebuilder:validation:Pattern:=^[^\s]+$
+	// +kubebuilder:validation:Optional
 	Type string `json:"type"`
 
 	// data is a list of SecretObjectData containing secret data source from the Secret Provider Class and the
