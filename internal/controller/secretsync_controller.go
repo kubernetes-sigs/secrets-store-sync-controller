@@ -152,7 +152,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Compute the hash of the secret
-	syncHash, err := r.computeSecretDataObjectHash(datamap, spc, ss)
+	syncHash, err := computeSecretDataObjectHash(datamap, spc, ss)
 	if err != nil {
 		logger.Error(err, "failed to compute secret data object hash", "secretName", secretName)
 		return ctrl.Result{}, err
@@ -397,7 +397,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 
 // computeSecretDataObjectHash computes the HMAC hash of the provided secret data
 // using the SS UID as the key.
-func (r *SecretSyncReconciler) computeSecretDataObjectHash(secretData map[string][]byte, spc *secretsstorecsiv1.SecretProviderClass, ss *secretsyncv1alpha1.SecretSync) (string, error) {
+func computeSecretDataObjectHash(secretData map[string][]byte, spc *secretsstorecsiv1.SecretProviderClass, ss *secretsyncv1alpha1.SecretSync) (string, error) {
 	// Serialize the secret data, parts of the spc and the ss data.
 	secretBytes, err := json.Marshal(secretData)
 	if err != nil {
