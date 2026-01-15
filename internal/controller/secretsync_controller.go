@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/pbkdf2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -136,21 +137,6 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// get the service account token
-	serviceAccountTokenAttrs, err := r.TokenClient.SecretProviderServiceAccountTokenAttrs(ss.Namespace, ss.Spec.ServiceAccountName, r.Audiences)
-	if err != nil {
-		logger.Error(err, "failed to get service account token", "name", ss.Spec.ServiceAccountName)
-
-		conditionReason := ConditionReasonSecretPatchFailedUnknownError
-		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
-			conditionReason = ConditionReasonValidatingAdmissionPolicyCheckFailed
-		}
-
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, conditionReason, true)
-
-		return ctrl.Result{}, err
-	}
-
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
 	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
@@ -159,58 +145,9 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// this is to mimic the parameters sent from CSI driver to the provider
-	parameters := make(map[string]string)
-	for k, v := range spc.Spec.Parameters {
-		parameters[k] = v
-	}
-
-	parameters[CSIPodName] = os.Getenv(SyncControllerPodName)
-	parameters[CSIPodUID] = os.Getenv(SyncControllerPodUID)
-	parameters[CSIPodNamespace] = req.Namespace
-	parameters[CSIPodServiceAccountName] = ss.Spec.ServiceAccountName
-
-	for k, v := range serviceAccountTokenAttrs {
-		parameters[k] = v
-	}
-
-	paramsJSON, err := json.Marshal(parameters)
+	datamap, reason, err := r.fetchSecretsFromProvider(ctx, logger, spc, ss)
 	if err != nil {
-		logger.Error(err, "failed to marshal parameters")
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
-	}
-
-	providerName := string(spc.Spec.Provider)
-	providerClient, err := r.ProviderClients.Get(ctx, providerName)
-	if err != nil {
-		logger.Error(err, "failed to get provider client", "provider", providerName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
-		return ctrl.Result{}, err
-	}
-
-	secretRefData := make(map[string]string)
-	var secretsJSON []byte
-	secretsJSON, err = json.Marshal(secretRefData)
-	if err != nil {
-		logger.Error(err, "failed to marshal secret")
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
-	}
-
-	oldObjectVersions := make(map[string]string)
-	_, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
-	if err != nil {
-		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedProviderError, true)
-		return ctrl.Result{}, err
-	}
-
-	secretType := corev1.SecretType(secretObj.Type)
-	var datamap map[string][]byte
-	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
-		logger.Error(err, "failed to get secret data", "secretName", secretName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
+		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, reason, true)
 		return ctrl.Result{}, err
 	}
 
@@ -257,7 +194,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Attempt to create or update the secret.
-	if err = r.serverSidePatchSecret(ctx, ss, datamap, secretType); err != nil {
+	if err = r.serverSidePatchSecret(ctx, ss, datamap); err != nil {
 		logger.Error(err, "failed to patch secret", "secretName", secretName)
 
 		// Rollback to the previous hash and the previous last successful sync time.
@@ -313,6 +250,93 @@ func (r *SecretSyncReconciler) validateLabelsAnnotations(
 	return nil
 }
 
+func (r *SecretSyncReconciler) fetchSecretsFromProvider(
+	ctx context.Context,
+	logger logr.Logger,
+	spc *secretsstorecsiv1.SecretProviderClass,
+	ss *secretsyncv1alpha1.SecretSync,
+) (map[string][]byte, string, error) {
+	providerName := string(spc.Spec.Provider)
+	providerClient, err := r.ProviderClients.Get(ctx, providerName)
+	if err != nil {
+		logger.Error(err, "failed to get provider client", "provider", providerName)
+		return nil, ConditionReasonControllerSpcError, err
+	}
+
+	paramsJSON, reason, err := r.prepareCSIProviderParams(logger, spc, ss.Namespace, ss.Spec.ServiceAccountName)
+	if err != nil {
+		return nil, reason, err
+	}
+
+	secretRefData := make(map[string]string)
+	var secretsJSON []byte
+	secretsJSON, err = json.Marshal(secretRefData)
+	if err != nil {
+		logger.Error(err, "failed to marshal secret")
+		return nil, ConditionReasonControllerInternalError, err
+	}
+
+	oldObjectVersions := make(map[string]string)
+	_, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
+	if err != nil {
+		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
+		return nil, ConditionReasonFailedProviderError, err
+	}
+
+	secretObj := ss.Spec.SecretObject
+	secretType := corev1.SecretType(secretObj.Type)
+	var datamap map[string][]byte
+	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
+		logger.Error(err, "failed to get secret data", "secretName", ss.Name)
+		return nil, ConditionReasonUserInputValidationFailed, err
+	}
+
+	return datamap, "", nil
+}
+
+// prepareCSIProviderPerams prepares the parameters that would normally be sent to
+// the provider by the CSI driver.
+// This function will attempt to fetch SA token unless it is cached.
+//
+// Returns JSON-serialized parameters, condition reason in case of an error, and the error itself.
+func (r *SecretSyncReconciler) prepareCSIProviderParams(
+	logger logr.Logger,
+	spc *secretsstorecsiv1.SecretProviderClass,
+	namespace,
+	saName string,
+) ([]byte, string, error) {
+	// get the service account token
+	serviceAccountTokenAttrs, err := r.TokenClient.SecretProviderServiceAccountTokenAttrs(namespace, saName, r.Audiences)
+	if err != nil {
+		logger.Error(err, "failed to get service account token", "name", saName)
+
+		conditionReason := ConditionReasonSecretPatchFailedUnknownError
+		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
+			conditionReason = ConditionReasonValidatingAdmissionPolicyCheckFailed
+		}
+
+		return nil, conditionReason, err
+	}
+
+	// this is to mimic the parameters sent from CSI driver to the provider
+	parameters := maps.Clone(spc.Spec.Parameters)
+
+	parameters[CSIPodName] = os.Getenv(SyncControllerPodName)
+	parameters[CSIPodUID] = os.Getenv(SyncControllerPodUID)
+	parameters[CSIPodNamespace] = namespace
+	parameters[CSIPodServiceAccountName] = saName
+
+	maps.Copy(parameters, serviceAccountTokenAttrs)
+
+	paramsJSON, err := json.Marshal(parameters)
+	if err != nil {
+		logger.Error(err, "failed to marshal parameters")
+		return nil, ConditionReasonControllerInternalError, err
+	}
+
+	return paramsJSON, "", nil
+}
+
 // checkIfErrorMessageCanBeDisplayed checks if the error message can be displayed in the condition message
 // based on the allowed strings to display condition error message defined in the conditions.go file.
 func checkIfErrorMessageCanBeDisplayed(errorMessage string) bool {
@@ -326,7 +350,7 @@ func checkIfErrorMessageCanBeDisplayed(errorMessage string) bool {
 
 // serverSidePatchSecret performs a server-side patch on a Kubernetes Secret.
 // It updates the specified secret with the provided data, labels, and annotations.
-func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, datamap map[string][]byte, secretType corev1.SecretType) (err error) {
+func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, datamap map[string][]byte) (err error) {
 	controllerLabels := maps.Clone(ss.Spec.SecretObject.Labels)
 	if controllerLabels == nil {
 		controllerLabels = make(map[string]string, 1)
@@ -354,7 +378,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 			},
 		},
 		Data: datamap,
-		Type: secretType,
+		Type: corev1.SecretType(ss.Spec.SecretObject.Type),
 	}
 
 	patchData, err := json.Marshal(secretPatchData)
