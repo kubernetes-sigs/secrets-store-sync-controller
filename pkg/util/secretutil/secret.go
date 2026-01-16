@@ -19,17 +19,13 @@ package secretutil
 import (
 	"crypto/ecdsa"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"math"
 	"strings"
 
-	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/pkcs12"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 )
@@ -194,37 +190,4 @@ func GetSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretTy
 		}
 	}
 	return datamap, nil
-}
-
-// GetSHAFromSecret gets SHA for the secret data
-func GetSHAFromSecret(data map[string][]byte) (string, error) {
-	if len(data) == 0 {
-		return "", nil
-	}
-
-	b := cryptobyte.NewBuilder(nil)
-	if len(data) > math.MaxUint32 {
-		return "", fmt.Errorf("data too large: length exceeds uint32 max")
-	}
-	// we are checking the length of the data to be less than uint32 max
-	// so we can safely cast it to uint32 without worrying about overflow
-	b.AddUint32(uint32(len(data))) // nolint:gosec
-
-	keys := sets.StringKeySet(data).List()
-
-	for _, k := range keys {
-		b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
-			b.AddBytes([]byte(k))
-		})
-		b.AddUint16LengthPrefixed(func(b *cryptobyte.Builder) {
-			b.AddBytes(data[k])
-		})
-	}
-
-	hashData, err := b.Bytes()
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%x", sha256.Sum256(hashData)), nil
 }
