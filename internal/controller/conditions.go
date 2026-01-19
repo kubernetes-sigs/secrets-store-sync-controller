@@ -67,7 +67,7 @@ const (
 	ConditionMessageUserInputValidationFailed = "Secret create or update failed due to SecretProviderClass or SecretSync error, check the logs or the events for more information."
 )
 
-var FailedConditionsTriggeringRetry = []string{
+var FailedConditionsTriggeringRetry = []string{ // FIXME: should be a set
 	ConditionReasonControllerSpcError,
 	ConditionReasonFailedInvalidAnnotationError,
 	ConditionReasonFailedInvalidLabelError,
