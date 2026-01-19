@@ -25,7 +25,7 @@ Before you begin, ensure the [following](https://kubernetes.io/docs/reference/ac
 If you're creating a kind cluster, here's a sample config:
 
 ```bash
-cat <<EOF | kind create cluster --name sync-controller --image kindest/node:v1.29.2 --config=-
+kind create cluster --name sync-controller --image kindest/node:v1.29.2 --config=- <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 featureGates:
@@ -62,7 +62,7 @@ Deploy the SecretProviderClass. The [SecretProviderClass](https://secrets-store-
 
 ```yaml
 export NAMESPACE=<namespace>
-cat <<EOF | kubectl apply -n ${NAMESPACE} -f -
+kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
@@ -86,7 +86,7 @@ Create a SecretSync object. The SecretSync object specifies the secret provider 
 
 ```yaml
 export SERVICE_ACCOUNT_NAME=<service_account_name>
-cat <<EOF | kubectl apply -n ${NAMESPACE} -f -
+kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: secret-sync.x-k8s.io/v1alpha1
 kind: SecretSync
 metadata:
