@@ -48,8 +48,8 @@ import (
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/util/secretutil"
 )
 
@@ -97,7 +97,7 @@ type SecretSyncReconciler struct {
 	Audiences       []string
 	Clientset       kubernetes.Interface
 	Scheme          *runtime.Scheme
-	TokenClient     *k8s.TokenClient
+	TokenCache      *token.Manager
 	ProviderClients AllClientBuilder
 	EventRecorder   record.EventRecorder
 }
@@ -307,7 +307,7 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 	saName string,
 ) ([]byte, string, error) {
 	// get the service account token
-	serviceAccountTokenAttrs, err := r.TokenClient.SecretProviderServiceAccountTokenAttrs(namespace, saName, r.Audiences)
+	serviceAccountTokenAttrs, err := token.SecretProviderServiceAccountTokenAttrs(r.TokenCache, namespace, saName, r.Audiences)
 	if err != nil {
 		logger.Error(err, "failed to get service account token", "name", saName)
 
