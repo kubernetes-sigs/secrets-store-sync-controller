@@ -38,8 +38,8 @@ import (
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 )
 
 type testCondition struct {
@@ -591,7 +591,7 @@ func newSecretSyncReconciler(
 		Client:          ctrlClient,
 		Clientset:       kubeClient,
 		Scheme:          scheme,
-		TokenClient:     k8s.NewTokenClient(kubeClient),
+		TokenCache:      token.NewManager(kubeClient),
 		ProviderClients: providerClients,
 	}
 
