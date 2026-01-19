@@ -26,6 +26,7 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -404,38 +405,21 @@ func computeSecretDataObjectHash(secretData map[string][]byte, spc *secretsstore
 		return "", err
 	}
 
-	spcBytesUID, err := json.Marshal(spc.UID)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, spcBytesUID...)
-
-	spcBytesGeneration, err := json.Marshal(spc.ObjectMeta.Generation)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, spcBytesGeneration...)
-
-	ssBytesUID, err := json.Marshal(ss.UID)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, ssBytesUID...)
-
-	ssBytesGeneration, err := json.Marshal(ss.ObjectMeta.Generation)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, ssBytesGeneration...)
-
-	ssBytesForceSync, err := json.Marshal(ss.Spec.ForceSynchronization)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, ssBytesForceSync...)
+	toHash := strings.Join(
+		[]string{
+			// SecretProviderClass bits
+			string(spc.UID),
+			strconv.FormatInt(spc.ObjectMeta.Generation, 10),
+			// SecretSync bits
+			string(ss.UID),
+			strconv.FormatInt(ss.ObjectMeta.Generation, 10),
+			ss.Spec.ForceSynchronization,
+		},
+		"|",
+	)
 
 	salt := []byte(string(ss.UID))
-	dk := pbkdf2.Key(secretBytes, salt, 100_000, 32, sha512.New)
+	dk := pbkdf2.Key(append(secretBytes, []byte(toHash)...), salt, 100_000, 32, sha512.New)
 
 	// Create a new HMAC instance with SHA-56 as the hash type and the pbkdf2 key.
 	hmac := hmac.New(sha512.New, dk)
@@ -447,7 +431,6 @@ func computeSecretDataObjectHash(secretData map[string][]byte, spc *secretsstore
 
 	// Get the final HMAC hash in hexadecimal format.
 	dataHmac := hmac.Sum(nil)
-	dataHmac = append([]byte(Version), dataHmac...)
 	hmacHex := hex.EncodeToString(dataHmac)
 
 	return hmacHex, nil
