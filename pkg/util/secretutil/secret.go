@@ -82,11 +82,10 @@ func getCert(data []byte) ([]byte, error) {
 	return certs, nil
 }
 
-// getPrivateKey returns the private key part of a cert
+// getPrivateKey returns the private key part of a cert in PEM form
 func getPrivateKey(data []byte) ([]byte, error) {
-	var der, derKey, rest []byte
+	var derKey, rest []byte
 	var pemBlock *pem.Block
-	privKeyType := privateKeyType
 
 	for {
 		pemBlock, rest = pem.Decode(data)
@@ -94,13 +93,18 @@ func getPrivateKey(data []byte) ([]byte, error) {
 			break
 		}
 		if pemBlock.Type != certType {
-			der = pemBlock.Bytes
+			break
 		}
 		data = rest
 	}
 
 	// if both der is nil, then certificate might be in the pfx format
-	if der == nil {
+	if pemBlock == nil {
+		// pkcs12.ToPEM mangles the private key in such a way, that it sets the
+		// block to "PRIVATE KEY" which would suggest PKCS#8 format, however
+		// the data is either PKCS#1 (RSA) or SEC 1 (ECDSA).
+		// This is why we cannot use k8s keyutil.ParsePrivateKeyPEM as it expects
+		// properly formatted data. Instead, guess RSA/ECDSA by parsing the DER.
 		pemBlocks, err := pkcs12.ToPEM(data, "")
 		if err != nil {
 			return nil, err
@@ -110,46 +114,65 @@ func getPrivateKey(data []byte) ([]byte, error) {
 		for _, block := range pemBlocks {
 			// get bytes for private key
 			if block.Type == privateKeyType {
-				der = block.Bytes
+				pemBlock = block
+				break
 			}
 		}
 	}
 
-	// parses an RSA private key in PKCS #1, ASN.1 DER form
-	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
-		privKeyType = privateKeyTypeRSA
-		derKey = x509.MarshalPKCS1PrivateKey(key)
+	if pemBlock == nil {
+		return nil, fmt.Errorf("there were no private keys in the bundle")
 	}
-	// parses an unencrypted private key in PKCS #8, ASN.1 DER form
-	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
-		switch key := key.(type) {
-		case *rsa.PrivateKey:
-			derKey = x509.MarshalPKCS1PrivateKey(key)
-			privKeyType = privateKeyTypeRSA
-		case *ecdsa.PrivateKey:
+
+	var keyType string
+	if pemBlock.Type == privateKeyType { // PRIVATE KEY matches the PKCS#8 format
+		// parses an unencrypted private key in PKCS #8, ASN.1 DER form
+		if key, err := x509.ParsePKCS8PrivateKey(pemBlock.Bytes); err == nil {
+			switch key := key.(type) {
+			case *rsa.PrivateKey:
+				derKey = x509.MarshalPKCS1PrivateKey(key)
+				keyType = privateKeyTypeRSA
+			case *ecdsa.PrivateKey:
+				derKey, err = x509.MarshalECPrivateKey(key)
+				keyType = privateKeyTypeEC
+				if err != nil {
+					return nil, err
+				}
+			default:
+				return nil, fmt.Errorf("unknown private key type found while getting key. Only rsa and ecdsa are supported")
+			}
+		}
+	}
+
+	if len(keyType) == 0 && (pemBlock.Type == privateKeyType || pemBlock.Type == privateKeyTypeRSA) {
+		// parses an RSA private key in PKCS #1, ASN.1 DER form
+		rsaKey, err := x509.ParsePKCS1PrivateKey(pemBlock.Bytes)
+		if err == nil {
+			keyType = privateKeyTypeRSA
+			derKey = x509.MarshalPKCS1PrivateKey(rsaKey)
+		}
+	}
+
+	if len(keyType) == 0 && (pemBlock.Type == privateKeyType || pemBlock.Type == privateKeyTypeEC) {
+		// parses an EC private key in SEC 1, ASN.1 DER form
+		if key, err := x509.ParseECPrivateKey(pemBlock.Bytes); err == nil {
 			derKey, err = x509.MarshalECPrivateKey(key)
-			privKeyType = privateKeyTypeEC
 			if err != nil {
 				return nil, err
 			}
-		default:
-			return nil, fmt.Errorf("unknown private key type found while getting key. Only rsa and ecdsa are supported")
+			keyType = privateKeyTypeEC
 		}
-	}
-	// parses an EC private key in SEC 1, ASN.1 DER form
-	if key, err := x509.ParseECPrivateKey(der); err == nil {
-		derKey, err = x509.MarshalECPrivateKey(key)
-		if err != nil {
-			return nil, err
-		}
-		privKeyType = privateKeyTypeEC
-	}
-	block := &pem.Block{
-		Type:  privKeyType,
-		Bytes: derKey,
 	}
 
-	return pem.EncodeToMemory(block), nil
+	if len(keyType) == 0 {
+		return nil, fmt.Errorf("there were no recognized keys in the bundle, only rsa and ecdsa are supported")
+	}
+
+	retBlock := &pem.Block{
+		Type:  keyType,
+		Bytes: derKey,
+	}
+	return pem.EncodeToMemory(retBlock), nil
 }
 
 // GetSecretData gets the object contents from the pods target path and returns a
