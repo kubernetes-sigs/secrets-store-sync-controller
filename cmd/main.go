@@ -37,8 +37,8 @@ import (
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/internal/controller"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/version"
 	//+kubebuilder:scaffold:imports
 )
@@ -103,7 +103,7 @@ func runMain() error {
 
 	// token request client
 	kubeClient := kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie())
-	tokenClient := k8s.NewTokenClient(kubeClient)
+	tokenCache := token.NewManager(kubeClient)
 
 	providerClients := provider.NewPluginClientBuilder(
 		[]string{*providerVolumePath},
@@ -122,7 +122,7 @@ func runMain() error {
 		Clientset:       kubeClient,
 		Client:          mgr.GetClient(),
 		Scheme:          mgr.GetScheme(),
-		TokenClient:     tokenClient,
+		TokenCache:      tokenCache,
 		ProviderClients: providerClients,
 		Audiences:       audiences,
 		EventRecorder:   record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
