@@ -33,7 +33,6 @@ import (
 	"github.com/go-logr/logr"
 	"golang.org/x/crypto/pbkdf2"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -120,9 +119,6 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// update status conditions
-	r.updateStatusConditions(ctx, ss, "", ConditionTypeUnknown, ConditionReasonUnknown, false)
-
 	// if the secret sync hash is empty, it means the secret does not exist, so the condition type is create
 	// otherwise, the condition type is update
 	conditionType := ConditionTypeUpdate
@@ -130,32 +126,41 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		conditionType = ConditionTypeCreate
 	}
 
+	if len(ss.Status.Conditions) < 2 {
+		if err := r.initConditions(ctx, ss); err != nil {
+			logger.Error(err, "failed to initialize SecretSync object conditions", "namespace", ss.Namespace, "name", ss.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
 	secretName := strings.TrimSpace(ss.Name)
 	secretObj := ss.Spec.SecretObject
 
-	err := r.validateLabelsAnnotations(ctx, secretObj, ss, conditionType)
+	reason, err := r.validateLabelsAnnotations(secretObj)
 	if err != nil {
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, err.Error(), true)
 		return ctrl.Result{}, err
 	}
 
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
 	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
-		logger.Error(err, "failed to get secret provider class", "name", ss.Spec.SecretProviderClassName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
+		logger.Error(err, "failed to get SecretProviderClass", "name", ss.Spec.SecretProviderClassName)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err), true)
 		return ctrl.Result{}, err
 	}
 
 	datamap, reason, err := r.fetchSecretsFromProvider(ctx, logger, spc, ss)
 	if err != nil {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, reason, true)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, fmt.Sprintf("fetching secrets from the provider failed: %v", err), true)
 		return ctrl.Result{}, err
 	}
 
 	// Compute the hash of the secret
-	syncHash, err := computeSecretDataObjectHash(datamap, spc, ss)
+	syncHash, err := computeCurrentStateHash(datamap, spc, ss)
 	if err != nil {
-		logger.Error(err, "failed to compute secret data object hash", "secretName", secretName)
+		logger.Error(err, "failed to compute state hash", "secretName", secretName) // TODO: could this leak secrets?
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSyncError, "failed to compute state hash", true)
 		return ctrl.Result{}, err
 	}
 
@@ -163,23 +168,23 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	hashChanged := syncHash != ss.Status.SyncHash
 
 	// Check if a secret create or update failed and if the controller should re-try the operation
-	failedCondition := metav1.Condition{}
+	var failedCondition *metav1.Condition
 	for _, ssCondition := range ss.Status.Conditions {
 		if slices.Contains(FailedConditionsTriggeringRetry, ssCondition.Reason) {
-			failedCondition = ssCondition
+			failedCondition = &ssCondition
 			break
 		}
 	}
 
-	if len(failedCondition.Type) == 0 && !hashChanged {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateNoValueChangeSucceeded, true)
+	if failedCondition == nil && !hashChanged {
 		return ctrl.Result{}, nil
 	}
 
 	if conditionType == ConditionTypeCreate {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonCreateSucceeded, false)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionTrue, ConditionReasonCreateSuccessful, ConditionMessageCreateSuccessful, false)
+		r.updateStatusConditions(ctx, ss, ConditionTypeUpdate, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
 	} else if hashChanged {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateValueChangeOrForceUpdateSucceeded, false)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
 	}
 
 	// Save current state for potential rollback.
@@ -190,10 +195,6 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	ss.Status.LastSuccessfulSyncTime = &metav1.Time{Time: time.Now()}
 	ss.Status.SyncHash = syncHash
 
-	if len(failedCondition.Type) != 0 {
-		meta.RemoveStatusCondition(&ss.Status.Conditions, failedCondition.Type)
-	}
-
 	// Attempt to create or update the secret.
 	if err = r.serverSidePatchSecret(ctx, ss, datamap); err != nil {
 		logger.Error(err, "failed to patch secret", "secretName", secretName)
@@ -202,24 +203,8 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		ss.Status.SyncHash = prevSecretHash
 		ss.Status.LastSuccessfulSyncTime = prevTime
 
-		// Reset the create or update conditions
-		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeCreate)
-		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeUpdate)
-
-		cond := ConditionReasonSecretPatchFailedUnknownError
-		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
-			cond = ConditionReasonValidatingAdmissionPolicyCheckFailed
-		}
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, cond, true)
-
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerPatchError, fmt.Sprintf("failed to patch secret %q: %v", ss.Name, err), true)
 		return ctrl.Result{}, err
-	}
-
-	// No errors found, remove the failed conditions.
-	for _, cond := range ss.Status.Conditions {
-		if slices.Contains(FailedConditionsTriggeringRetry, cond.Reason) {
-			meta.RemoveStatusCondition(&ss.Status.Conditions, cond.Type)
-		}
 	}
 
 	// Update the status.
@@ -233,22 +218,17 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *SecretSyncReconciler) validateLabelsAnnotations(
-	ctx context.Context,
 	secretObj secretsyncv1alpha1.SecretObject,
-	ss *secretsyncv1alpha1.SecretSync,
-	conditionType string,
-) error {
+) (string, error) {
 	if val, ok := secretObj.Labels[ControllerLabelKey]; ok && len(val) > 0 {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedInvalidLabelError, true)
-		return fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", ControllerLabelKey)
+		return ConditionReasonFailedInvalidLabelError, fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", ControllerLabelKey)
 	}
 
 	if _, ok := secretObj.Annotations[ControllerAnnotationKey]; ok {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedInvalidAnnotationError, true)
-		return fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", ControllerAnnotationKey)
+		return ConditionReasonFailedInvalidAnnotationError, fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", ControllerAnnotationKey)
 	}
 
-	return nil
+	return "", nil
 }
 
 func (r *SecretSyncReconciler) fetchSecretsFromProvider(
@@ -274,7 +254,7 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	secretsJSON, err = json.Marshal(secretRefData)
 	if err != nil {
 		logger.Error(err, "failed to marshal secret")
-		return nil, ConditionReasonControllerInternalError, err
+		return nil, ConditionReasonControllerSyncError, err
 	}
 
 	oldObjectVersions := make(map[string]string)
@@ -289,7 +269,7 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	var datamap map[string][]byte
 	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
 		logger.Error(err, "failed to get secret data", "secretName", ss.Name)
-		return nil, ConditionReasonUserInputValidationFailed, err
+		return nil, ConditionReasonRemoteSecretStoreFetchFailed, err
 	}
 
 	return datamap, "", nil
@@ -311,12 +291,7 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 	if err != nil {
 		logger.Error(err, "failed to get service account token", "name", saName)
 
-		conditionReason := ConditionReasonSecretPatchFailedUnknownError
-		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
-			conditionReason = ConditionReasonValidatingAdmissionPolicyCheckFailed
-		}
-
-		return nil, conditionReason, err
+		return nil, ConditionReasonControllerSyncError, err
 	}
 
 	// this is to mimic the parameters sent from CSI driver to the provider
@@ -332,21 +307,10 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 	paramsJSON, err := json.Marshal(parameters)
 	if err != nil {
 		logger.Error(err, "failed to marshal parameters")
-		return nil, ConditionReasonControllerInternalError, err
+		return nil, ConditionReasonControllerSyncError, err
 	}
 
 	return paramsJSON, "", nil
-}
-
-// checkIfErrorMessageCanBeDisplayed checks if the error message can be displayed in the condition message
-// based on the allowed strings to display condition error message defined in the conditions.go file.
-func checkIfErrorMessageCanBeDisplayed(errorMessage string) bool {
-	for _, allowedString := range AllowedStringsToDisplayConditionErrorMessage {
-		if strings.Contains(strings.ToLower(errorMessage), allowedString) {
-			return true
-		}
-	}
-	return false
 }
 
 // serverSidePatchSecret performs a server-side patch on a Kubernetes Secret.
@@ -398,7 +362,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 
 // computeSecretDataObjectHash computes the HMAC hash of the provided secret data
 // using the SS UID as the key.
-func computeSecretDataObjectHash(secretData map[string][]byte, spc *secretsstorecsiv1.SecretProviderClass, ss *secretsyncv1alpha1.SecretSync) (string, error) {
+func computeCurrentStateHash(secretData map[string][]byte, spc *secretsstorecsiv1.SecretProviderClass, ss *secretsyncv1alpha1.SecretSync) (string, error) {
 	// Serialize the secret data, parts of the spc and the ss data.
 	secretBytes, err := json.Marshal(secretData)
 	if err != nil {
