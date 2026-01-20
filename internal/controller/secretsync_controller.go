@@ -103,7 +103,7 @@ type SecretSyncReconciler struct {
 //+kubebuilder:rbac:groups=secret-sync.x-k8s.io,resources=secretsyncs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=create;patch
 //+kubebuilder:rbac:groups="",resources="serviceaccounts/token",verbs=create
-//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+//+kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
 func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
