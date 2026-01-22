@@ -74,8 +74,9 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml" \
     "sse2esecret" \
-    "Secret update failed because the controller could not retrieve the Secret Provider Class or the SPC is misconfigured. Check the logs or the events for more information." \
-    "ControllerSPCError" \
+    "SecretCreated" \
+    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": SecretProviderClass.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
+    "SecretProviderClassMisconfigured" \
     "False" \
     "spc-namespace" \
     "ss-namespace"
@@ -88,8 +89,9 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/api_credential_secretsync.yaml" \
     "my-custom-api-secret" \
-    "Secret update failed due to validating admission policy check failure, check the logs or the events for more information." \
-    "ValidatingAdmissionPolicyCheckFailed" \
+    "SecretCreated" \
+    "failed to patch secret \\\"my-custom-api-secret\\\": secrets \\\"my-custom-api-secret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with example.com/api-credentials type in the default namespace. The controller can only create or update secrets in the allowed types list with a single secretsync owner." \
+    "ControllerPatchError" \
     "False"
 
   kubectl delete -f "$BATS_RESOURCE_YAML_DIR/api_credential_secretsync.yaml"
@@ -100,8 +102,9 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml" \
     "sse2eserviceaccountsecret" \
-    "Secret update failed due to validating admission policy check failure, check the logs or the events for more information." \
-    "ValidatingAdmissionPolicyCheckFailed" \
+    "SecretCreated" \
+    "failed to patch secret \\\"sse2eserviceaccountsecret\\\": secrets \\\"sse2eserviceaccountsecret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-token-deny-policy' with binding 'secrets-store-sync-controller-create-update-token-deny-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with kubernetes.io/service-account-token type in the default namespace. The controller is not allowed to create or update secrets with this type." \
+    "ControllerPatchError" \
     "False"
 
   kubectl delete -f $BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml
