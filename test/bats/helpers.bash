@@ -101,41 +101,36 @@ deploy_and_wait_for_resource() {
 verify_secretsync_status() {
   local name="$1"
   local namespace="$2"
-  local expected_message="$3"
-  local expected_reason="$4"
-  local expected_status="$5"
+  local condition_type="$3"
+  local expected_message="$4"
+  local expected_reason="$5"
+  local expected_status="$6"
+
   local timeout=60
   local interval=5
   local elapsed=0
 
   while (( elapsed < timeout )); do
-    # Attempt to fetch the status
-    local status
-    status=$(kubectl get secretsyncs.secret-sync.x-k8s.io/"$name" -n "${namespace}" -o jsonpath='{.status.conditions[0]}' 2>/dev/null || echo "")
+    # Attempt to fetch the condition
+    local condition_got
+    condition_got=$(kubectl get secretsyncs.secret-sync.x-k8s.io/"$name" -n "${namespace}" -o jsonpath='{.status.conditions}' | jq -c ".[] | select(.type==\"${condition_type}\") | {type:.type,status:.status,reason:.reason,message:.message}")
 
-    # If the status is not empty, perform verification
-    if [[ -n "$status" ]]; then
-      local message
-      message=$(echo "$status" | jq -r .message)
-      
-      local reason
-      reason=$(echo "$status" | jq -r .reason)
-      
-      local status_value
-      status_value=$(echo "$status" | jq -r .status)
-
-      if [[ "${message}" == "${expected_message}" && "${reason}" == "${expected_reason}" && "${status_value}" == "${expected_status}" ]]; then
-        echo "Status verified successfully for SecretSync: ${name} in namespace: ${namespace}"
-        return 0
-      else
-        echo "Status: ${status} found but does not match expected values for SecretSync: ${name} in namespace: ${namespace}"
-        return 1
-      fi
+    if [[ -z "$condition_got" ]] || [[ "$(echo "$condition_got" | jq -r '.status')" == "Unknown" ]]; then
+      # Sleep and increment elapsed time only if the status was empty or the sync is just starting
+      sleep "$interval"
+      elapsed=$((elapsed + interval))
+      continue
     fi
 
-    # Sleep and increment elapsed time only if the status was empty
-    sleep "$interval"
-    elapsed=$((elapsed + interval))
+    local expected_condition
+    expected_condition="{\"type\":\"${condition_type}\",\"status\":\"${expected_status}\",\"reason\":\"${expected_reason}\",\"message\":\"${expected_message}\"}"
+
+    if [[ ! "${condition_got}" == "${expected_condition}" ]]; then
+      echo "Condition: ${condition_got} found but does not match expected values for SecretSync '${namespace}/${name}': ${expected_condition}"
+      return 1
+    else
+      return 0
+    fi
   done
 
   echo "Timeout reached while waiting for SecretSync status to become available for: $name in namespace: $namespace"
@@ -155,11 +150,12 @@ deploy_spc_ss_verify_conditions() {
   local provider_yaml="$1"
   local sync_yaml="$2"
   local sync_name="$3"
-  local expected_message="$4"
-  local expected_reason="$5"
-  local expected_status="$6"
-  local spc_namespace="${7:-default}"
-  local ss_namespace="${8:-default}"
+  local checked_condition_type="$4"
+  local expected_message="$5"
+  local expected_reason="$6"
+  local expected_status="$7"
+  local spc_namespace="${8:-default}"
+  local ss_namespace="${9:-default}"
   
   # Deploy SecretProviderClass and wait for it
   deploy_and_wait_for_resource "${spc_namespace}" "${provider_yaml}" "e2e-providerspc" "secretproviderclasses.secrets-store.csi.x-k8s.io"
@@ -168,7 +164,7 @@ deploy_spc_ss_verify_conditions() {
   deploy_and_wait_for_resource "${ss_namespace}" "${sync_yaml}" "${sync_name}" "secretsyncs.secret-sync.x-k8s.io"
 
   # Verify SecretSync status
-  verify_secretsync_status "${sync_name}" "${ss_namespace}" "${expected_message}" "${expected_reason}" "${expected_status}"
+  verify_secretsync_status "${sync_name}" "${ss_namespace}" "${checked_condition_type}" "${expected_message}" "${expected_reason}" "${expected_status}"
 
   # Verify secret is not created
   verify_secret_not_exists "${sync_name}" "${ss_namespace}"
