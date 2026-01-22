@@ -103,7 +103,7 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml" \
     "sse2eserviceaccountsecret" \
     "SecretCreated" \
-    "failed to patch secret \\\"sse2eserviceaccountsecret\\\": secrets \\\"sse2eserviceaccountsecret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-token-deny-policy' with binding 'secrets-store-sync-controller-create-update-token-deny-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with kubernetes.io/service-account-token type in the default namespace. The controller is not allowed to create or update secrets with this type." \
+    "failed to patch secret \\\"sse2eserviceaccountsecret\\\": secrets \\\"sse2eserviceaccountsecret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with kubernetes.io/service-account-token type in the default namespace. The controller is not allowed to create or update secrets with this type." \
     "ControllerPatchError" \
     "False"
 

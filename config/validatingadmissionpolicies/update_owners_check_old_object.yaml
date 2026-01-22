@@ -40,11 +40,9 @@ spec:
       resources:   ["secrets"]
   variables:
   - name: hasOneSecretSyncOwner
-    expression: "has(oldObject.metadata.ownerReferences) && (size(oldObject.metadata.ownerReferences) == 1 && oldObject.metadata.ownerReferences.all(o, o.kind == 'SecretSync' && o.apiVersion.startsWith('secret-sync.x-k8s.io/') && o.name == object.metadata.name))"
-  - name: allowedSecretTypes
-    expression: "params.data.exists_one(x, params.data[x] == oldObject.type) ? true : false"
+    expression: "has(oldObject.metadata.ownerReferences) && size(oldObject.metadata.ownerReferences) == 1 && oldObject.metadata.ownerReferences.all(o, o.kind == 'SecretSync' && o.apiVersion.startsWith('secret-sync.x-k8s.io/') && o.name == object.metadata.name)"
   validations:
-  - expression: "variables.allowedSecretTypes == true && variables.hasOneSecretSyncOwner == true"
-    message: "Only secrets with one secret sync owner and with types defined in the allowedSecretTypes list can be updated by the controller"
-    messageExpression: "string(params.data.controllerName)  + ' has failed to ' +  string(request.operation) + ' old secret with ' + string(object.type) + ' type ' + 'in the ' + string(request.namespace) + ' namespace. The controller can only update secrets in the allowed types list with a single secretsync owner.'"
+  - expression: "variables.hasOneSecretSyncOwner == true"
+    message: "Only secrets with one secret sync owner can be updated by the controller"
+    messageExpression: "string(params.data.controllerName)  + ' has failed to ' +  string(request.operation) + ' old secret in the ' + string(request.namespace) + ' namespace. The controller can only update secrets with a single secretsync owner.'"
     reason: "Forbidden"
