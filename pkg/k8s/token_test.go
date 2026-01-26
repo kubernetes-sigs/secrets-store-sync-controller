@@ -63,7 +63,7 @@ func TestSecretProviderServiceAccountTokenAttrs(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.desc, func(t *testing.T) {
-			client := fakeclient.NewSimpleClientset()
+			client := fakeclient.NewClientset()
 			client.PrependReactor("create", "serviceaccounts", clitesting.ReactionFunc(func(action clitesting.Action) (bool, runtime.Object, error) {
 				tr := action.(clitesting.CreateAction).GetObject().(*authenticationv1.TokenRequest)
 				scheme.Default(tr)

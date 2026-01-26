@@ -34,7 +34,6 @@ import (
 	authenticationv1 "k8s.io/api/authentication/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -131,18 +130,6 @@ func (m *Manager) GetServiceAccountToken(namespace, name string, tr *authenticat
 
 	m.set(key, tr)
 	return tr, nil
-}
-
-// DeleteServiceAccountToken should be invoked when pod got deleted. It simply
-// clean token manager cache.
-func (m *Manager) DeleteServiceAccountToken(podUID types.UID) {
-	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-	for k, tr := range m.cache {
-		if tr.Spec.BoundObjectRef.UID == podUID {
-			delete(m.cache, k)
-		}
-	}
 }
 
 func (m *Manager) cleanup() {

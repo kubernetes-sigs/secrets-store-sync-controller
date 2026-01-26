@@ -129,11 +129,6 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	secretName := strings.TrimSpace(ss.Name)
 	secretObj := ss.Spec.SecretObject
-	if err := secretutil.ValidateSecretObject(secretName, secretObj); err != nil {
-		logger.Error(err, "failed to validate secret object", "secretName", secretName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
-		return ctrl.Result{}, err
-	}
 
 	labels, annotations, err := r.prepareLabelsAndAnnotations(ctx, secretObj, ss, conditionType)
 	if err != nil {
@@ -273,12 +268,11 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeCreate)
 		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeUpdate)
 
+		cond := ConditionReasonSecretPatchFailedUnknownError
 		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
-			failedCondition.Message = err.Error()
-			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonValidatingAdmissionPolicyCheckFailed, true)
-		} else {
-			r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonSecretPatchFailedUnknownError, true)
+			cond = ConditionReasonValidatingAdmissionPolicyCheckFailed
 		}
+		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, cond, true)
 
 		return ctrl.Result{}, err
 	}

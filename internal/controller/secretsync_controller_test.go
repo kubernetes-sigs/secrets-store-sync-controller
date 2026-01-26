@@ -137,54 +137,6 @@ func TestReconcile(t *testing.T) {
 			expectedErrorString: `secretsyncs.secret-sync.x-k8s.io "sse2esecret" not found`,
 		},
 		{
-			name: "invalid SecretObject returns validation error",
-			secretProviderClassToProcess: &secretsstorecsiv1.SecretProviderClass{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-spc",
-					Namespace: "default",
-				},
-				Spec: secretsstorecsiv1.SecretProviderClassSpec{
-					Provider: "fake-provider",
-					Parameters: map[string]string{
-						"foo": "v1",
-					},
-				},
-			},
-			secretSyncToProcess: &secretsyncv1alpha1.SecretSync{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "sse2esecret",
-					Namespace: "default",
-				},
-				Spec: secretsyncv1alpha1.SecretSyncSpec{
-					ServiceAccountName:      "default",
-					SecretProviderClassName: "test-spc",
-					SecretObject: secretsyncv1alpha1.SecretObject{
-						Data: []secretsyncv1alpha1.SecretObjectData{
-							{
-								SourcePath: "foo",
-								TargetKey:  "bar",
-							},
-						},
-					},
-				},
-			},
-			secret: &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "sse2esecret",
-					Namespace: "default",
-				},
-				Data: map[string][]byte{
-					"foo": []byte("bar"),
-				},
-			},
-			expectedErrorString: "secret type is empty",
-			expectedCondition: &testCondition{
-				Type:   "Create",
-				Status: corev1.ConditionFalse,
-				Reason: "UserInputValidationFailed",
-			},
-		},
-		{
 			name: "use of reserved label returns validation error",
 			secretProviderClassToProcess: &secretsstorecsiv1.SecretProviderClass{
 				ObjectMeta: metav1.ObjectMeta{
@@ -634,7 +586,7 @@ func newSecretSyncReconciler(
 	providerClients := provider.NewPluginClientBuilder([]string{socketPath})
 
 	// Create a ReconcileSecretSync object with the scheme and fake client
-	kubeClient := fakeclient.NewSimpleClientset(testSecret)
+	kubeClient := fakeclient.NewClientset(testSecret)
 	ssc := &SecretSyncReconciler{
 		Client:          ctrlClient,
 		Clientset:       kubeClient,
