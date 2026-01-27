@@ -53,34 +53,34 @@ import (
 )
 
 const (
-	// CSIPodName is the name of the pod that the mount is created for
-	CSIPodName = "csi.storage.k8s.io/pod.name"
+	// csiPodName is the name of the pod that the mount is created for
+	csiPodName = "csi.storage.k8s.io/pod.name"
 
-	// CSIPodNamespace is the namespace of the pod that the mount is created for
-	CSIPodNamespace = "csi.storage.k8s.io/pod.namespace"
+	// csiPodNamespace is the namespace of the pod that the mount is created for
+	csiPodNamespace = "csi.storage.k8s.io/pod.namespace"
 
-	// CSIPodUID is the UID of the pod that the mount is created for
-	CSIPodUID = "csi.storage.k8s.io/pod.uid"
+	// csiPodUID is the UID of the pod that the mount is created for
+	csiPodUID = "csi.storage.k8s.io/pod.uid"
 
-	// CSIPodServiceAccountName is the name of the pod service account that the mount is created for
-	CSIPodServiceAccountName = "csi.storage.k8s.io/serviceAccount.name"
+	// csiPodServiceAccountName is the name of the pod service account that the mount is created for
+	csiPodServiceAccountName = "csi.storage.k8s.io/serviceAccount.name"
 
-	// CSIPodServiceAccountTokens is the service account tokens of the pod that the mount is created for
-	CSIPodServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens" //nolint
-
-	// Label applied by the controller to the secret object
-	ControllerLabelKey = "secrets-store.sync.x-k8s.io"
+	// csiPodServiceAccountTokens is the service account tokens of the pod that the mount is created for
+	csiPodServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens" //nolint
 
 	// Label applied by the controller to the secret object
-	ControllerAnnotationKey = "secrets-store.sync.x-k8s.io"
+	controllerLabelKey = "secrets-store.sync.x-k8s.io"
 
-	// SecretSyncControllerFieldManager is the field manager used by the secrets store sync controller
-	SecretSyncControllerFieldManager = "secrets-store-sync-controller"
+	// Annotation applied by the controller to the secret object
+	controllerAnnotationKey = "secrets-store.sync.x-k8s.io"
+
+	// secretSyncControllerFieldManager is the field manager used by the secrets store sync controller
+	secretSyncControllerFieldManager = "secrets-store-sync-controller"
 
 	// Environment variables set using downward API to pass as params to the controller
 	// Used to maintain the same logic as the Secrets Store CSI driver
-	SyncControllerPodName = "SYNC_CONTROLLER_POD_NAME"
-	SyncControllerPodUID  = "SYNC_CONTROLLER_POD_UID"
+	syncControllerPodName = "SYNC_CONTROLLER_POD_NAME"
+	syncControllerPodUID  = "SYNC_CONTROLLER_POD_UID"
 )
 
 type AllClientBuilder interface {
@@ -217,12 +217,12 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *SecretSyncReconciler) validateLabelsAnnotations(
 	secretObj secretsyncv1alpha1.SecretObject,
 ) (string, error) {
-	if val, ok := secretObj.Labels[ControllerLabelKey]; ok && len(val) > 0 {
-		return ConditionReasonFailedInvalidLabelError, fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", ControllerLabelKey)
+	if val, ok := secretObj.Labels[controllerLabelKey]; ok && len(val) > 0 {
+		return ConditionReasonFailedInvalidLabelError, fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", controllerLabelKey)
 	}
 
-	if _, ok := secretObj.Annotations[ControllerAnnotationKey]; ok {
-		return ConditionReasonFailedInvalidAnnotationError, fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", ControllerAnnotationKey)
+	if _, ok := secretObj.Annotations[controllerAnnotationKey]; ok {
+		return ConditionReasonFailedInvalidAnnotationError, fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", controllerAnnotationKey)
 	}
 
 	return "", nil
@@ -294,10 +294,10 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 	// this is to mimic the parameters sent from CSI driver to the provider
 	parameters := maps.Clone(spc.Spec.Parameters)
 
-	parameters[CSIPodName] = os.Getenv(SyncControllerPodName)
-	parameters[CSIPodUID] = os.Getenv(SyncControllerPodUID)
-	parameters[CSIPodNamespace] = namespace
-	parameters[CSIPodServiceAccountName] = saName
+	parameters[csiPodName] = os.Getenv(syncControllerPodName)
+	parameters[csiPodUID] = os.Getenv(syncControllerPodUID)
+	parameters[csiPodNamespace] = namespace
+	parameters[csiPodServiceAccountName] = saName
 
 	maps.Copy(parameters, serviceAccountTokenAttrs)
 
@@ -317,7 +317,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 	if controllerLabels == nil {
 		controllerLabels = make(map[string]string, 1)
 	}
-	controllerLabels[ControllerLabelKey] = ""
+	controllerLabels[controllerLabelKey] = ""
 
 	// Construct the patch for updating the Secret.
 	secretPatchData := corev1.Secret{
@@ -349,7 +349,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 	}
 
 	// Perform the server-side patch on the Secret.
-	_, err = r.Clientset.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: SecretSyncControllerFieldManager})
+	_, err = r.Clientset.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager})
 	if err != nil {
 		return err
 	}
