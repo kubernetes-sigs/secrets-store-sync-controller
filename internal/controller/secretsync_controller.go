@@ -74,11 +74,8 @@ const (
 	// Label applied by the controller to the secret object
 	ControllerAnnotationKey = "secrets-store.sync.x-k8s.io"
 
-	// Version is the version of the secrets store sync controller
-	Version = "v1"
-
 	// SecretSyncControllerFieldManager is the field manager used by the secrets store sync controller
-	SecretSyncControllerFieldManager = Version + "-secrets-store-sync-controller"
+	SecretSyncControllerFieldManager = "secrets-store-sync-controller"
 
 	// Environment variables set using downward API to pass as params to the controller
 	// Used to maintain the same logic as the Secrets Store CSI driver
