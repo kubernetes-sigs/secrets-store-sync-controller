@@ -65,7 +65,7 @@ type SecretObject struct {
 	// On secret update, if the validation admission policy is set, the controller will check if the label
 	// secrets-store.sync.x-k8s.io/secretsync=<secret-sync-name> is present. If the label is not present,
 	// controller fails to update the secret.
-	// +kubebuilder:validation:XValidation:message="Labels should have < 63 characters for both keys and values.",rule="(self.all(x, x.size() < 63 && self[x].size() < 63) == true)"
+	// +kubebuilder:validation:XValidation:message="Label keys must not exceed 317 characters (254 for prefix+separator, 63 for name), label values must not exceed 63 characters.",rule="(self.all(x, x.size() <= 317 && self[x].size() <= 63) == true)"
 	// +kubebuilder:validation:XValidation:message="Labels should not contain secrets-store.sync.x-k8s.io. This key is reserved for the controller.",rule="(self.all(x, x.startsWith('secrets-store.sync.x-k8s.io') == false))"
 	// +optional
 	Labels map[string]string `json:"labels,omitempty"`
@@ -73,7 +73,7 @@ type SecretObject struct {
 	// annotations contains key-value pairs representing annotations associated with the Kubernetes secret object.
 	// The following annotation prefix is reserved: secrets-store.sync.x-k8s.io/.
 	// Creation fails if the annotation key is specified in the SecretSync object by the user.
-	// +kubebuilder:validation:XValidation:message="Annotations should have < 253 characters for both keys and values.",rule="(self.all(x, x.size() < 253 && self[x].size() < 253) == true)"
+	// +kubebuilder:validation:XValidation:message="Annotations keys must not exceed 317 characters (254 for prefix+separator, 63 for name), annotation values must not exceed 256 kB.",rule="(self.all(x, x.size() < 317 && self[x].size() <= 262144) == true)"
 	// +kubebuilder:validation:XValidation:message="Annotations should not contain secrets-store.sync.x-k8s.io. This key is reserved for the controller.",rule="(self.all(x, x.startsWith('secrets-store.sync.x-k8s.io') == false))"
 	// +optional
 	Annotations map[string]string `json:"annotations,omitempty"`
