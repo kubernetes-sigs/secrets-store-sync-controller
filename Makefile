@@ -87,6 +87,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	cp ./config/crd/bases/secret-sync.x-k8s.io_secretsyncs.yaml ./manifest_staging/charts/secrets-store-sync-controller/crds/secret-sync.x-k8s.io_secretsyncs.yaml
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
