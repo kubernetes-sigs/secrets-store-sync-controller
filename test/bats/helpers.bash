@@ -146,6 +146,23 @@ verify_secret_not_exists() {
   assert_failure
 }
 
+create_secretsync_expect_fail() {
+  local provider_yaml="$1"
+  local secretsync_yaml="$2"
+  local expected_message="$3"
+  local provider_ns="${4:-default}"
+  local secretsync_ns="${4:-default}"
+
+  kubectl apply -n "${provider_ns}" -f "${provider_yaml}"
+
+  output=$(kubectl apply -n "${secretsync_ns}" -f "${secretsync_yaml}" 2>&1 || true)
+
+  if [[ ! "${output}" == "${expected_message}" ]]; then
+    echo "expected output: '${expected_message}' got '${output}'"
+    return 1
+  fi
+}
+
 deploy_spc_ss_verify_conditions() {
   local provider_yaml="$1"
   local sync_yaml="$2"
@@ -165,25 +182,6 @@ deploy_spc_ss_verify_conditions() {
 
   # Verify SecretSync status
   verify_secretsync_status "${sync_name}" "${ss_namespace}" "${checked_condition_type}" "${expected_message}" "${expected_reason}" "${expected_status}"
-
-  # Verify secret is not created
-  verify_secret_not_exists "${sync_name}" "${ss_namespace}"
-}
-
-deploy_spc_ss_expect_failure() {
-  local spc_yaml="$1"
-  local ss_yaml="$2"
-  local sync_name="$3"
-  local expected_message="$4"
-  local spc_namespace="${5:-default}"
-  local ss_namespace="${6:-default}"
-
-  # Deploy SecretProviderClass and wait for it
-  deploy_and_wait_for_resource "${spc_namespace}" "${spc_yaml}" "e2e-providerspc" "secretproviderclasses.secrets-store.csi.x-k8s.io"
-
-  # Deploy SecretSync and expect it to fail
-  output=$(kubectl apply -n "${ss_namespace}" -f "${ss_yaml}" 2>&1 || true)
-  [[ "${output}" == *"${expected_message}"* ]]
 
   # Verify secret is not created
   verify_secret_not_exists "${sync_name}" "${ss_namespace}"
