@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -69,12 +70,31 @@ func NewManager(c clientset.Interface) *Manager {
 		return supported
 	}
 
+	nodeName := os.Getenv("SYNC_CONTROLLER_NODE_NAME")
+	if len(nodeName) == 0 {
+		panic("SYNC_CONTROLLER_NODE_NAME env var is not set")
+	}
+	controllerNode, err := c.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		panic(err)
+	}
+	nodeUID := controllerNode.UID
+
 	m := &Manager{
 		getToken: func(name, namespace string, tr *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
 			if c == nil {
 				return nil, errors.New("cannot use TokenManager when kubelet is in standalone mode")
 			}
-			tokenRequest, err := c.CoreV1().ServiceAccounts(namespace).CreateToken(context.TODO(), name, tr, metav1.CreateOptions{})
+
+			tokenRequest := tr.DeepCopy()
+			tokenRequest.Spec.BoundObjectRef = &authenticationv1.BoundObjectReference{
+				APIVersion: "v1",
+				Kind:       "Node",
+				Name:       nodeName,
+				UID:        nodeUID,
+			}
+
+			tokenRequest, err := c.CoreV1().ServiceAccounts(namespace).CreateToken(context.TODO(), name, tokenRequest, metav1.CreateOptions{})
 			if apierrors.IsNotFound(err) && !tokenRequestsSupported() {
 				return nil, fmt.Errorf("the API server does not have TokenRequest endpoints enabled")
 			}
@@ -89,7 +109,6 @@ func NewManager(c clientset.Interface) *Manager {
 
 // Manager manages service account tokens for pods.
 type Manager struct {
-
 	// cacheMutex guards the cache
 	cacheMutex sync.RWMutex
 	cache      map[string]*authenticationv1.TokenRequest

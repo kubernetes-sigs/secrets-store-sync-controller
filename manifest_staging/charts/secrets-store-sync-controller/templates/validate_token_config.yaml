@@ -21,9 +21,20 @@ spec:
     expression: {{ include "secrets-store-sync-controller.tokenAudienceComparison" . | quote }}
   - name: requestHasOnlyOneAudience
     expression: "object.spec.audiences.size() == 1"
+  - name: isNodeLocalRequest
+    expression: >-
+      has(object.spec.boundObjectRef)
+      && has(object.spec.boundObjectRef.apiVersion) && object.spec.boundObjectRef.apiVersion == "v1"
+      && has(object.spec.boundObjectRef.kind) && object.spec.boundObjectRef.kind == "Node"
+      && has(object.spec.boundObjectRef.name)
+      && has(object.spec.boundObjectRef.uid)
+      && "authentication.kubernetes.io/node-name" in request.userInfo.extra && size(request.userInfo.extra["authentication.kubernetes.io/node-name"]) == 1
+      && "authentication.kubernetes.io/node-uid" in request.userInfo.extra && size(request.userInfo.extra["authentication.kubernetes.io/node-uid"]) == 1
+      && request.userInfo.extra['authentication.kubernetes.io/node-name'][0] == object.spec.boundObjectRef.name
+      && request.userInfo.extra['authentication.kubernetes.io/node-uid'][0] == object.spec.boundObjectRef.uid
   validations:
   - expression: "variables.hasCorrectAudience == true && variables.expirationSeconds == true && variables.requestHasOnlyOneAudience == true"
     message: "'Creating a serviceaccount token has failed because the configuration isn't correct.'"
-    messageExpression: "'secrets-store-sync-controller has failed to ' +  string(request.operation) + ' ' + string(request.name) + ' token in the ' + string(request.namespace) + ' namespace. Check the configuration.'"
+    messageExpression: "'secrets-store-sync-controller has failed to ' +  string(request.operation) + ' ' + string(request.name) + ' token in the ' + string(request.namespace) + ' namespace.'"
     reason: "Forbidden"
 {{- end -}}
