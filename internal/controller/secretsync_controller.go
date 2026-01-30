@@ -446,7 +446,7 @@ func (r *SecretSyncReconciler) processIfSecretChanged(oldObj, newObj client.Obje
 	ssOldObj := oldObj.(*secretsyncv1alpha1.SecretSync)
 	ssNewObj := newObj.(*secretsyncv1alpha1.SecretSync)
 
-	return ssNewObj.Status.SyncHash != ssOldObj.Status.SyncHash
+	return ssOldObj.Generation != ssNewObj.Generation
 }
 
 // We need to trigger the reconcile function when the secret sync object is created or updated, however
