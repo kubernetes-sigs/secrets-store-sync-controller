@@ -648,10 +648,10 @@ func newSecretSyncReconciler(
 	kubeClient := fakeclient.NewClientset(testSecret)
 	ssc := &SecretSyncReconciler{
 		Client:          ctrlClient,
-		Clientset:       kubeClient,
-		Scheme:          scheme,
-		TokenCache:      token.NewManager(kubeClient),
-		ProviderClients: providerClients,
+		clientset:       kubeClient,
+		scheme:          scheme,
+		tokenCache:      token.NewManager(kubeClient),
+		providerClients: providerClients,
 	}
 
 	return &testSecretSyncReconciler{
