@@ -21,8 +21,19 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/sdk/metric"
+	basemetrics "k8s.io/component-base/metrics"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
+
+var controllerMetricsRegistry basemetrics.KubeRegistry
+
+func init() {
+	controllerMetricsRegistry = basemetrics.NewKubeRegistry()
+}
+
+func Registry() basemetrics.KubeRegistry {
+	return controllerMetricsRegistry
+}
 
 func initPrometheusExporter() error {
 	exporter, err := prometheus.New(

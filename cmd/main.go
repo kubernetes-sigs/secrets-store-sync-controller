@@ -17,87 +17,73 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
+	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apiserver/pkg/server"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/kubernetes"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	basemetricsreg "k8s.io/component-base/metrics/legacyregistry"
+	"k8s.io/klog/v2"
 
-	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
+	ssclients "sigs.k8s.io/secrets-store-sync-controller/client/clientset/versioned"
+	ssinformers "sigs.k8s.io/secrets-store-sync-controller/client/informers/externalversions"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/controller"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/version"
-	//+kubebuilder:scaffold:imports
 )
 
 var (
-	scheme                  = runtime.NewScheme()
-	setupLog                = ctrl.Log.WithName("setup")
-	metricsAddr             = flag.String("metrics-bind-address", ":8085", "The address the metric endpoint binds to.")
-	enableLeaderElection    = flag.Bool("leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
-	leaderElectionNamespace = flag.String("leader-election-namespace", "", "Namespace for leader election")
-	probeAddr               = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	tokenRequestAudiences   = flag.String("token-request-audience", "", "Audience for the token request, comma separated.")
-	providerVolumePath      = flag.String("provider-volume", "/provider", "Volume path for provider.")
-	maxCallRecvMsgSize      = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
-	versionInfo             = flag.Bool("version", false, "Print the version and exit")
+	kubeconfig            = flag.String("kubeconfig", "", "Location of the master configuration file to run from.")
+	tokenRequestAudiences = flag.String("token-request-audience", "", "Audience for the token request, comma separated.")
+	metricsAddr           = flag.String("metrics-bind-address", ":8085", "The address the metric endpoint binds to.")
+	providerVolumePath    = flag.String("provider-volume", "/provider", "Volume path for provider.")
+	maxCallRecvMsgSize    = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
 )
 
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	utilruntime.Must(secretsyncv1alpha1.AddToScheme(scheme))
-
-	utilruntime.Must(secretsstorecsiv1.AddToScheme(scheme))
-	//+kubebuilder:scaffold:scheme
-}
+const defaultResyncPeriod = 1 * time.Hour
 
 func runMain() error {
-	opts := zap.Options{
-		Development: true,
-	}
-	opts.BindFlags(flag.CommandLine)
+	klog.InitFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	shutdownCtx, cancel := context.WithCancel(context.Background())
+	shutdownHandler := server.SetupSignalHandler()
+	go func() {
+		defer cancel()
+		<-shutdownHandler
+		klog.Infof("Received SIGTERM or SIGINT signal, shutting down controller.")
+	}()
 
-	if *versionInfo {
-		versionErr := version.PrintVersion()
-		if versionErr != nil {
-			setupLog.Error(versionErr, "failed to print version")
-			return versionErr
-		}
-		return nil
-	}
+	logger := klog.FromContext(shutdownCtx)
 
-	controllerConfig := ctrl.GetConfigOrDie()
-	controllerConfig.UserAgent = version.GetUserAgent("secrets-store-sync-controller")
-	mgr, err := ctrl.NewManager(controllerConfig, ctrl.Options{
-		Scheme: scheme,
-		Metrics: server.Options{
-			BindAddress: *metricsAddr,
-		},
-		HealthProbeBindAddress:  *probeAddr,
-		LeaderElection:          *enableLeaderElection,
-		LeaderElectionID:        "29f1d54e.secret-sync.x-k8s.io",
-		LeaderElectionNamespace: *leaderElectionNamespace,
-	})
+	cfg, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		return err
+		logger.Error(err, "Error building kubeconfig")
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
 	}
+	cfg.UserAgent = "secret-store-sync-controller"
+
+	protoCfg := rest.CopyConfig(cfg)
+	protoCfg.AcceptContentTypes = "application/vnd.kubernetes.protobuf,application/json"
+	protoCfg.ContentType = "application/vnd.kubernetes.protobuf"
 
 	// token request client
-	kubeClient := kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie())
+	kubeClient := kubernetes.NewForConfigOrDie(protoCfg)
+	dynamicClient := dynamic.NewForConfigOrDie(cfg)
+	secretSyncs := ssclients.NewForConfigOrDie(cfg)
+
+	ssInformers := ssinformers.NewSharedInformerFactory(secretSyncs, defaultResyncPeriod)
+	dynamicInformers := dynamicinformer.NewDynamicSharedInformerFactory(dynamicClient, defaultResyncPeriod)
 
 	providerClients := provider.NewPluginClientBuilder(
 		[]string{*providerVolumePath},
@@ -112,33 +98,48 @@ func runMain() error {
 		audiences = []string{}
 	}
 
-	if err = controller.NewSecretSyncReconciler(
-		mgr.GetClient(),
-		mgr.GetScheme(),
+	httpOKHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
+	controllerMux := http.NewServeMux()
+	controllerMux.Handle("/metrics", basemetricsreg.Handler())
+	controllerMux.Handle("/healthz", httpOKHandler)
+	controllerMux.Handle("/readyz", httpOKHandler)
+
+	syncController, err := controller.NewSecretSyncReconciler(
+		shutdownCtx,
 		kubeClient,
+		dynamicInformers,
+		secretSyncs.SecretSyncV1alpha1(),
+		ssInformers.SecretSync().V1alpha1().SecretSyncs(),
 		providerClients,
 		audiences,
-	).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")
-		return err
-	}
-	//+kubebuilder:scaffold:builder
-
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		return err
-	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
+	)
+	if err != nil {
 		return err
 	}
 
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
-		return err
+	ssInformers.Start(shutdownCtx.Done())
+	dynamicInformers.Start(shutdownCtx.Done())
+	go syncController.Run(shutdownCtx, 1)
+
+	if err := startControllerServer(shutdownCtx, *metricsAddr, controllerMux); err != nil {
+		return fmt.Errorf("failed to start a server for the controller: %w", err)
 	}
 
+	<-shutdownCtx.Done() // FIXME: it might be a bit too early to quit here as the controllers will just be exiting - setup a waitgroup for controllers?
+	return nil
+}
+
+func startControllerServer(ctx context.Context, listenAddress string, handler http.Handler) error {
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(ctx, "tcp", *metricsAddr)
+	if err != nil {
+		logger := klog.FromContext(ctx)
+		logger.Error(err, "failed to start a listener", "listenAddress", listenAddress)
+		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
+	}
+	go http.Serve(listener, handler)
 	return nil
 }
 

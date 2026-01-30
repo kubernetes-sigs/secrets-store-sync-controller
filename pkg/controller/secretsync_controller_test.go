@@ -28,17 +28,19 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic/dynamicinformer"
+	fakedynamic "k8s.io/client-go/dynamic/fake"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
+
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 	providerfake "sigs.k8s.io/secrets-store-csi-driver/provider/fake"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
+	ssfake "sigs.k8s.io/secrets-store-sync-controller/client/clientset/versioned/fake"
+	secretsynclister "sigs.k8s.io/secrets-store-sync-controller/client/listers/secretsync/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 )
@@ -128,7 +130,7 @@ func TestReconcile(t *testing.T) {
 					},
 				},
 			},
-			secretSyncToProcess: &secretsyncv1alpha1.SecretSync{},
+			secretSyncToProcess: nil,
 			secret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "sse2esecret",
@@ -138,7 +140,7 @@ func TestReconcile(t *testing.T) {
 					"foo": []byte("bar"),
 				},
 			},
-			expectedErrorString: `secretsyncs.secret-sync.x-k8s.io "sse2esecret" not found`,
+			expectedErrorString: `secretsync.secret-sync.x-k8s.io "sse2esecret" not found`,
 		},
 		{
 			name: "use of reserved label returns validation error",
@@ -422,21 +424,20 @@ func TestReconcile(t *testing.T) {
 		},
 	}
 
-	scheme := setupScheme(t)
-
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			testSecretSyncReconciler := newSecretSyncReconciler(t, scheme, test.secretProviderClassToProcess, test.secretSyncToProcess, test.secret)
+			testCtx, cancel := context.WithCancel(klog.NewContext(context.Background(), klog.NewKlogr()))
+			defer cancel()
+
+			testSecretSyncReconciler := newSecretSyncReconciler(testCtx, t, test.secretProviderClassToProcess, test.secretSyncToProcess, test.secret)
 
 			// Mock request to simulate Reconcile being called
-			req := ctrl.Request{
-				NamespacedName: types.NamespacedName{
-					Name:      "sse2esecret",
-					Namespace: "default",
-				},
+			objRef := cache.ObjectName{
+				Name:      "sse2esecret",
+				Namespace: "default",
 			}
 
-			_, err := testSecretSyncReconciler.secretSyncReconciler.Reconcile(context.Background(), req)
+			err := testSecretSyncReconciler.secretSyncReconciler.sync(testCtx, objRef)
 			if len(test.expectedErrorString) > 0 {
 				if err == nil || err.Error() != test.expectedErrorString {
 					t.Fatalf("expected error %q, got %q", test.expectedErrorString, err)
@@ -446,7 +447,7 @@ func TestReconcile(t *testing.T) {
 			}
 
 			// validate status condition
-			ss := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, req)
+			ss := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, objRef)
 			if gotConditions := ss.Status.Conditions; !compareConditionsWithoutTransitionTime(gotConditions, test.expectedConditions) {
 				t.Fatalf("expected conditions %v, got %v", test.expectedConditions, gotConditions)
 			}
@@ -455,6 +456,9 @@ func TestReconcile(t *testing.T) {
 }
 
 func TestConditionsOnHashChange(t *testing.T) {
+	testCtx, cancel := context.WithCancel(klog.NewContext(context.Background(), klog.NewKlogr()))
+	defer cancel()
+
 	secretProviderClassToProcess := &secretsstorecsiv1.SecretProviderClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-spc",
@@ -496,24 +500,19 @@ func TestConditionsOnHashChange(t *testing.T) {
 		},
 	}
 
-	scheme := setupScheme(t)
-	testSecretSyncReconciler := newSecretSyncReconciler(t, scheme, secretProviderClassToProcess, secretSyncToProcess, secret)
+	testSecretSyncReconciler := newSecretSyncReconciler(testCtx, t, secretProviderClassToProcess, secretSyncToProcess, secret)
 
-	// Mock request to simulate Reconcile being called
-	req := ctrl.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "sse2esecret",
-			Namespace: "default",
-		},
+	objRef := cache.ObjectName{
+		Name:      "sse2esecret",
+		Namespace: "default",
 	}
-
-	_, err := testSecretSyncReconciler.secretSyncReconciler.Reconcile(context.Background(), req)
+	err := testSecretSyncReconciler.secretSyncReconciler.sync(testCtx, objRef)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// simulate update with no secret value change
-	_, err = testSecretSyncReconciler.secretSyncReconciler.Reconcile(context.Background(), req)
+	err = testSecretSyncReconciler.secretSyncReconciler.sync(testCtx, objRef)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -531,7 +530,7 @@ func TestConditionsOnHashChange(t *testing.T) {
 			Message: "Secret contains last observed values.",
 		},
 	}
-	ss := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, req)
+	ss := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, objRef)
 	oldHash := ss.Status.SyncHash
 	oldUpdateTime := ss.Status.LastSuccessfulSyncTime
 	if gotConditions := ss.Status.Conditions; !compareConditionsWithoutTransitionTime(gotConditions, expectedConditions) {
@@ -549,7 +548,7 @@ func TestConditionsOnHashChange(t *testing.T) {
 
 	// Sleep so that we can observe LastTransitionTime change in LastSuccessfulSyncTime
 	time.Sleep(1 * time.Second)
-	_, err = testSecretSyncReconciler.secretSyncReconciler.Reconcile(context.Background(), req)
+	err = testSecretSyncReconciler.secretSyncReconciler.sync(testCtx, objRef)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -567,7 +566,7 @@ func TestConditionsOnHashChange(t *testing.T) {
 			Message: "Secret contains last observed values.",
 		},
 	}
-	ssChanged := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, req)
+	ssChanged := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, objRef)
 	if gotConditions := ssChanged.Status.Conditions; !compareConditionsWithoutTransitionTime(gotConditions, expectedConditionAsfterSecretChange) {
 		t.Fatalf("expected condition %v, got %v", expectedConditionAsfterSecretChange, gotConditions)
 	}
@@ -582,11 +581,10 @@ func TestConditionsOnHashChange(t *testing.T) {
 	}
 }
 
-func getSecretSyncObject(t *testing.T, ssc *SecretSyncReconciler, req ctrl.Request) *secretsyncv1alpha1.SecretSync {
+func getSecretSyncObject(t *testing.T, ssc *SecretSyncReconciler, objRef cache.ObjectName) *secretsyncv1alpha1.SecretSync {
 	t.Helper()
 
-	secretSync := &secretsyncv1alpha1.SecretSync{}
-	err := ssc.Get(context.Background(), req.NamespacedName, secretSync)
+	secretSync, err := ssc.ssClient.SecretSyncs(objRef.Namespace).Get(context.TODO(), objRef.Name, metav1.GetOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
 		t.Fatalf("error getting secret sync: %v", err)
 	}
@@ -595,22 +593,13 @@ func getSecretSyncObject(t *testing.T, ssc *SecretSyncReconciler, req ctrl.Reque
 }
 
 func newSecretSyncReconciler(
+	ctx context.Context,
 	t *testing.T,
-	scheme *runtime.Scheme,
 	spc *secretsstorecsiv1.SecretProviderClass,
 	secretSync *secretsyncv1alpha1.SecretSync,
 	testSecret *corev1.Secret,
 ) *testSecretSyncReconciler {
 	t.Helper()
-
-	initObjects := []client.Object{
-		testSecret,
-		spc,
-		secretSync,
-	}
-
-	// Create a fake client to mock API calls
-	ctrlClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(initObjects...).WithStatusSubresource(secretSync).Build()
 
 	// Create a mock provider named "fake-provider".
 	// t.TempDir() creates a temporary directory which might have long path. sever.Start() fails with long path.
@@ -642,16 +631,49 @@ func newSecretSyncReconciler(
 	}
 	t.Cleanup(server.Stop)
 
-	providerClients := provider.NewPluginClientBuilder([]string{socketPath})
+	fakeDynamicScheme := runtime.NewScheme()
+	if err := secretsstorecsiv1.AddToScheme(fakeDynamicScheme); err != nil {
+		t.Fatalf("failed to init dynamic scheme with secretstorecsi v1 API")
+	}
 
-	// Create a ReconcileSecretSync object with the scheme and fake client
-	kubeClient := fakeclient.NewClientset(testSecret)
+	secretSyncs := []runtime.Object{}
+	if secretSync != nil {
+		secretSyncs = append(secretSyncs, secretSync)
+	}
+
+	// Create a fake client to mock API calls
+	fakeClient := fakeclient.NewClientset(testSecret)
+	fakeDynamic := fakedynamic.NewSimpleDynamicClient(fakeDynamicScheme, spc)
+	fakeSecretSyncs := ssfake.NewSimpleClientset(secretSyncs...)
+
+	ssCache := cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})
+	if secretSync != nil {
+		if err := ssCache.Add(secretSync); err != nil {
+			t.Fatalf("unable to add secretsync object to the cache: %v", err)
+		}
+	}
+
+	dynamicInformer := dynamicinformer.NewDynamicSharedInformerFactory(fakeDynamic, 0)
+	spcInformer := dynamicInformer.ForResource(secretsstorecsiv1.SchemeGroupVersion.WithResource("secretproviderclasses"))
+	dynamicInformer.Start(ctx.Done())
+
 	ssc := &SecretSyncReconciler{
-		Client:          ctrlClient,
-		clientset:       kubeClient,
-		scheme:          scheme,
-		tokenCache:      token.NewManager(kubeClient),
-		providerClients: providerClients,
+		clients:  fakeClient,
+		ssClient: fakeSecretSyncs.SecretSyncV1alpha1(),
+
+		ssLister:                  secretsynclister.NewSecretSyncLister(ssCache),
+		ssSynced:                  func() bool { return true },
+		secretProviderClassLister: spcInformer.Lister(),
+		secretProviderClassSynced: spcInformer.Informer().HasSynced,
+
+		tokenCache:      token.NewManager(fakeClient),
+		providerClients: provider.NewPluginClientBuilder([]string{socketPath}),
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if !cache.WaitForCacheSync(waitCtx.Done(), spcInformer.Informer().HasSynced) {
+		t.Fatal("dynamic informer cache never became synced")
 	}
 
 	return &testSecretSyncReconciler{
@@ -676,23 +698,4 @@ func compareConditionsWithoutTransitionTime(a, b []metav1.Condition) bool {
 	}
 
 	return true
-}
-
-func setupScheme(t *testing.T) *runtime.Scheme {
-	t.Helper()
-	scheme := runtime.NewScheme()
-
-	if err := secretsstorecsiv1.AddToScheme(scheme); err != nil {
-		t.Fatalf("Unable to add SecretProviderClass to scheme: %v", err)
-	}
-
-	if err := secretsyncv1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatalf("Unable to add SecretSync to scheme: %v", err)
-	}
-
-	if err := clientgoscheme.AddToScheme(scheme); err != nil {
-		t.Fatalf("Unable to add ClientGo scheme: %v", err)
-	}
-
-	return scheme
 }
