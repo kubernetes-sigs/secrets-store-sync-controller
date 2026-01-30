@@ -22,12 +22,10 @@ import (
 	"strings"
 
 	"google.golang.org/grpc"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -37,7 +35,6 @@ import (
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/internal/controller"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/version"
 	//+kubebuilder:scaffold:imports
 )
@@ -101,7 +98,6 @@ func runMain() error {
 
 	// token request client
 	kubeClient := kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie())
-	tokenCache := token.NewManager(kubeClient)
 
 	providerClients := provider.NewPluginClientBuilder(
 		[]string{*providerVolumePath},
@@ -116,15 +112,13 @@ func runMain() error {
 		audiences = []string{}
 	}
 
-	if err = (&controller.SecretSyncReconciler{
-		Clientset:       kubeClient,
-		Client:          mgr.GetClient(),
-		Scheme:          mgr.GetScheme(),
-		TokenCache:      tokenCache,
-		ProviderClients: providerClients,
-		Audiences:       audiences,
-		EventRecorder:   record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
-	}).SetupWithManager(mgr); err != nil {
+	if err = controller.NewSecretSyncReconciler(
+		mgr.GetClient(),
+		mgr.GetScheme(),
+		kubeClient,
+		providerClients,
+		audiences,
+	).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")
 		return err
 	}
