@@ -21,7 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"k8s.io/klog/v2"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
 )
@@ -48,31 +48,11 @@ const (
 	ConditionMessageUpdateSuccessful = "Secret contains last observed values."
 )
 
-var FailedConditionsTriggeringRetry = []string{ // FIXME: should be a set
-	ConditionReasonControllerSpcError,
-	ConditionReasonFailedInvalidAnnotationError,
-	ConditionReasonFailedInvalidLabelError,
-	ConditionReasonFailedProviderError,
-	ConditionReasonFailedInvalidAnnotationError,
-	ConditionReasonFailedProviderError,
-	ConditionReasonRemoteSecretStoreFetchFailed,
-	ConditionReasonControllerPatchError,
-	ConditionReasonControllerSyncError,
-}
+func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ssCopy *secretsyncv1alpha1.SecretSync, conditionType string, conditionStatus metav1.ConditionStatus, conditionReason, conditionMessage string, shouldUpdateStatus bool) error {
+	logger := klog.FromContext(ctx)
 
-var SuccessfulConditionsTriggeringRetry = []string{
-	ConditionReasonCreateSuccessful,
-	ConditionReasonSecretUpToDate}
-
-var AllowedStringsToDisplayConditionErrorMessage = []string{
-	"validatingadmissionpolicy",
-}
-
-func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, conditionType string, conditionStatus metav1.ConditionStatus, conditionReason, conditionMessage string, shouldUpdateStatus bool) {
-	logger := log.FromContext(ctx)
-
-	if ss.Status.Conditions == nil {
-		ss.Status.Conditions = []metav1.Condition{}
+	if ssCopy.Status.Conditions == nil {
+		ssCopy.Status.Conditions = []metav1.Condition{}
 	}
 
 	condition := metav1.Condition{
@@ -83,20 +63,21 @@ func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *s
 	}
 
 	logger.V(10).Info("Adding new condition", "newConditionType", conditionType, "conditionReason", conditionReason)
-	meta.SetStatusCondition(&ss.Status.Conditions, condition)
+	meta.SetStatusCondition(&ssCopy.Status.Conditions, condition)
 
 	if !shouldUpdateStatus {
-		return
+		return nil
 	}
 
-	if err := r.client.Status().Update(ctx, ss); err != nil {
+	if _, err := r.ssClient.SecretSyncs(ssCopy.Namespace).UpdateStatus(ctx, ssCopy, metav1.UpdateOptions{}); err != nil {
 		logger.Error(err, "Failed to update status", "condition", condition)
+		return err
 	}
 
-	logger.V(10).Info("Updated status", "condition", condition)
+	return nil
 }
 
-func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync) error {
+func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync) (*secretsyncv1alpha1.SecretSync, error) {
 	if ss.Status.Conditions == nil {
 		ss.Status.Conditions = []metav1.Condition{}
 	}
@@ -113,5 +94,5 @@ func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyn
 		Reason: ConditionReasonNoUpdateAttemptedYet,
 	})
 
-	return r.client.Status().Update(ctx, ss)
+	return r.ssClient.SecretSyncs(ss.Namespace).UpdateStatus(ctx, ss, metav1.UpdateOptions{})
 }

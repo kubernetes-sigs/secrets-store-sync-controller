@@ -17,137 +17,16 @@ limitations under the License.
 package main
 
 import (
-	"flag"
 	"os"
-	"strings"
-	"time"
 
-	"google.golang.org/grpc"
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/client-go/kubernetes"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
+	"k8s.io/component-base/cli"
 
-	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/controller"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/version"
-	//+kubebuilder:scaffold:imports
+	_ "k8s.io/component-base/logs/json/register" // register the json logger
+
+	"sigs.k8s.io/secrets-store-sync-controller/cmd/app"
 )
-
-var (
-	scheme                  = runtime.NewScheme()
-	setupLog                = ctrl.Log.WithName("setup")
-	metricsAddr             = flag.String("metrics-bind-address", ":8085", "The address the metric endpoint binds to.")
-	enableLeaderElection    = flag.Bool("leader-elect", false, "Enable leader election for controller manager. "+"Enabling this will ensure there is only one active controller manager.")
-	leaderElectionNamespace = flag.String("leader-election-namespace", "", "Namespace for leader election")
-	probeAddr               = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
-	tokenRequestAudiences   = flag.String("token-request-audience", "", "Audience for the token request, comma separated.")
-	providerVolumePath      = flag.String("provider-volume", "/provider", "Volume path for provider.")
-	rotationPollInterval    = flag.Duration("rotation-poll-interval", 12*time.Hour, "Polling interval to resync secrets from the provider. Defaults to 12h. To disable provider polling, set it to 0s.")
-	maxCallRecvMsgSize      = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
-	versionInfo             = flag.Bool("version", false, "Print the version and exit")
-)
-
-func init() {
-	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
-	utilruntime.Must(secretsyncv1alpha1.AddToScheme(scheme))
-
-	utilruntime.Must(secretsstorecsiv1.AddToScheme(scheme))
-	//+kubebuilder:scaffold:scheme
-}
-
-func runMain() error {
-	opts := zap.Options{
-		Development: true,
-	}
-	opts.BindFlags(flag.CommandLine)
-	flag.Parse()
-
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
-
-	if *versionInfo {
-		versionErr := version.PrintVersion()
-		if versionErr != nil {
-			setupLog.Error(versionErr, "failed to print version")
-			return versionErr
-		}
-		return nil
-	}
-
-	controllerConfig := ctrl.GetConfigOrDie()
-	controllerConfig.UserAgent = version.GetUserAgent("secrets-store-sync-controller")
-	mgr, err := ctrl.NewManager(controllerConfig, ctrl.Options{
-		Scheme: scheme,
-		Metrics: server.Options{
-			BindAddress: *metricsAddr,
-		},
-		HealthProbeBindAddress:  *probeAddr,
-		LeaderElection:          *enableLeaderElection,
-		LeaderElectionID:        "29f1d54e.secret-sync.x-k8s.io",
-		LeaderElectionNamespace: *leaderElectionNamespace,
-	})
-	if err != nil {
-		setupLog.Error(err, "unable to start manager")
-		return err
-	}
-
-	// token request client
-	kubeClient := kubernetes.NewForConfigOrDie(ctrl.GetConfigOrDie())
-
-	providerClients := provider.NewPluginClientBuilder(
-		[]string{*providerVolumePath},
-		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(*maxCallRecvMsgSize),
-		),
-	)
-	defer providerClients.Cleanup()
-
-	audiences := strings.Split(*tokenRequestAudiences, ",")
-	if len(*tokenRequestAudiences) == 0 {
-		audiences = []string{}
-	}
-
-	if err = controller.NewSecretSyncReconciler(
-		mgr.GetClient(),
-		mgr.GetScheme(),
-		kubeClient,
-		providerClients,
-		audiences,
-	).SetupWithManager(mgr, *rotationPollInterval); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")
-		return err
-	}
-	//+kubebuilder:scaffold:builder
-
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up health check")
-		return err
-	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
-		setupLog.Error(err, "unable to set up ready check")
-		return err
-	}
-
-	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		setupLog.Error(err, "problem running manager")
-		return err
-	}
-
-	return nil
-}
 
 func main() {
-	if err := runMain(); err != nil {
-		os.Exit(1)
-	}
-
-	os.Exit(0)
+	code := cli.Run(app.NewSecretsStoreSyncControllerCommand())
+	os.Exit(code)
 }

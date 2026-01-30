@@ -24,32 +24,33 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/record"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/source"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
 
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
+	csiinformers "sigs.k8s.io/secrets-store-csi-driver/pkg/client/informers/externalversions/apis/v1"
+	csilisters "sigs.k8s.io/secrets-store-csi-driver/pkg/client/listers/apis/v1"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
+
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
+	ssclients "sigs.k8s.io/secrets-store-sync-controller/client/clientset/versioned/typed/secretsync/v1alpha1"
+	ssinformers "sigs.k8s.io/secrets-store-sync-controller/client/informers/externalversions/secretsync/v1alpha1"
+	sslisters "sigs.k8s.io/secrets-store-sync-controller/client/listers/secretsync/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/util/secretutil"
@@ -81,6 +82,8 @@ const (
 	// Used to maintain the same logic as the Secrets Store CSI driver
 	syncControllerPodName = "SYNC_CONTROLLER_POD_NAME"
 	syncControllerPodUID  = "SYNC_CONTROLLER_POD_UID"
+
+	controllerName = "secret-sync-controller"
 )
 
 type AllClientBuilder interface {
@@ -89,52 +92,176 @@ type AllClientBuilder interface {
 
 // SecretSyncReconciler reconciles a SecretSync object
 type SecretSyncReconciler struct {
-	client          client.Client
+	clients  kubernetes.Interface
+	ssClient ssclients.SecretSyncV1alpha1Interface
+
+	ssLister                  sslisters.SecretSyncLister
+	ssSynced                  cache.InformerSynced
+	secretProviderClassLister csilisters.SecretProviderClassLister
+	secretProviderClassSynced cache.InformerSynced
+
 	audiences       []string
-	clientset       kubernetes.Interface
-	scheme          *runtime.Scheme
 	tokenCache      *token.Manager
 	providerClients AllClientBuilder
-	eventRecorder   record.EventRecorder
+
+	workqueue workqueue.TypedRateLimitingInterface[cache.ObjectName]
+	// rate limiter for the resynced items, prevents workqueue flooding with just resync
+	// items. Chose BucketRateLimiter, we'll handle item error backoff with the workqueue default
+	// rate limiter.
+	resyncRateLimiter *workqueue.TypedBucketRateLimiter[cache.ObjectName]
 }
 
 func NewSecretSyncReconciler(
-	controlleRuntimeClient client.Client,
-	scheme *runtime.Scheme,
 	kubeClient kubernetes.Interface,
+	secretSyncClient ssclients.SecretSyncV1alpha1Interface,
+	secretSyncInformer ssinformers.SecretSyncInformer,
 	providerClients AllClientBuilder,
+	secretProviderClassInformer csiinformers.SecretProviderClassInformer,
 	saTokenAudiences []string,
-) *SecretSyncReconciler {
-	return &SecretSyncReconciler{
-		client: controlleRuntimeClient,
-		scheme: scheme,
+) (*SecretSyncReconciler, error) {
+	c := &SecretSyncReconciler{
+		clients:  kubeClient,
+		ssClient: secretSyncClient,
 
-		clientset:  kubeClient,
+		ssLister: secretSyncInformer.Lister(),
+		ssSynced: secretSyncInformer.Informer().HasSynced,
+
+		secretProviderClassLister: secretProviderClassInformer.Lister(),
+		secretProviderClassSynced: secretProviderClassInformer.Informer().HasSynced,
+
 		tokenCache: token.NewManager(kubeClient),
 		audiences:  saTokenAudiences,
 
 		providerClients: providerClients,
 
-		eventRecorder: record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
+		workqueue: workqueue.NewTypedRateLimitingQueueWithConfig(
+			workqueue.DefaultTypedControllerRateLimiter[cache.ObjectName](),
+			workqueue.TypedRateLimitingQueueConfig[cache.ObjectName]{
+				Name: controllerName,
+			},
+		),
+		resyncRateLimiter: &workqueue.TypedBucketRateLimiter[cache.ObjectName]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+	}
+
+	if _, err := secretSyncInformer.Informer().AddEventHandler(
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: c.enqueue,
+			// we're currently using the informer to react to resyncs - rather than
+			// reacting to just status changes by comparing obj Generation, we must
+			// always add the object to the queue
+			UpdateFunc: func(oldObj, newObj any) {
+				ssOldObj := oldObj.(*secretsyncv1alpha1.SecretSync)
+				ssNewObj := newObj.(*secretsyncv1alpha1.SecretSync)
+
+				if ssOldObj.Generation != ssNewObj.Generation {
+					c.enqueue(newObj)
+				} else {
+					c.enqueueAfter(newObj, c.resyncRateLimiter.When(cache.MetaObjectToName(ssNewObj)))
+				}
+			},
+		},
+	); err != nil {
+		return nil, err
+	}
+
+	return c, nil
+}
+
+func (r *SecretSyncReconciler) enqueueAfter(obj any, after time.Duration) {
+	enqueue(func(o cache.ObjectName) { r.workqueue.AddAfter(o, after) }, obj)
+}
+
+func (r *SecretSyncReconciler) enqueue(obj any) {
+	enqueue(r.workqueue.AddRateLimited, obj)
+}
+
+func enqueue(addToQueue func(o cache.ObjectName), obj any) {
+	objRef, err := cache.ObjectToName(obj)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	addToQueue(objRef)
+}
+
+func (r *SecretSyncReconciler) Run(ctx context.Context, workers int) error {
+	defer utilruntime.HandleCrash()
+	defer r.workqueue.ShutDown()
+	logger := klog.LoggerWithName(klog.FromContext(ctx), controllerName)
+	ctx = klog.NewContext(ctx, logger)
+
+	// Start the informer factories to begin populating the informer caches
+	logger.Info("Starting controller")
+
+	// Wait for the caches to be synced before starting workers
+	logger.Info("Waiting for informer caches to sync")
+
+	if ok := cache.WaitForCacheSync(ctx.Done(), r.ssSynced, r.secretProviderClassSynced); !ok {
+		return fmt.Errorf("failed to wait for caches to sync")
+	}
+
+	var wg sync.WaitGroup
+	defer func() {
+		logger.Info("Shutting down workers")
+		r.workqueue.ShutDown()
+		wg.Wait()
+	}()
+
+	logger.Info("Starting workers", "count", workers)
+	// Launch two workers to process Foo resources
+	for range workers {
+		wg.Go(func() { wait.UntilWithContext(ctx, r.runWorker, time.Second) })
+	}
+
+	logger.Info("Started workers")
+	<-ctx.Done()
+
+	return nil
+}
+
+func (r *SecretSyncReconciler) runWorker(ctx context.Context) {
+	for r.processNextWorkItem(ctx) {
 	}
 }
 
-//+kubebuilder:rbac:groups=secret-sync.x-k8s.io,resources=secretsyncs,verbs=get;list;watch
-//+kubebuilder:rbac:groups=secret-sync.x-k8s.io,resources=secretsyncs/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups="",resources=secrets,verbs=create;patch
-//+kubebuilder:rbac:groups="",resources="serviceaccounts/token",verbs=create
-//+kubebuilder:rbac:groups="events.k8s.io",resources=events,verbs=create;patch
-//+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
+func (r *SecretSyncReconciler) processNextWorkItem(ctx context.Context) bool {
+	objRef, shutdown := r.workqueue.Get()
 
-func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconciling SecretSync", "namespace", req.NamespacedName.String())
+	if shutdown {
+		return false
+	}
+	defer r.workqueue.Done(objRef)
 
-	// get the secret sync object
-	ss := &secretsyncv1alpha1.SecretSync{}
-	if err := r.client.Get(ctx, req.NamespacedName, ss); err != nil {
+	logger := klog.FromContext(ctx).WithValues("namespace", objRef.Namespace, "name", objRef.Name)
+	ctx = klog.NewContext(ctx, logger)
+
+	err := r.sync(ctx, objRef)
+	if err == nil {
+		r.workqueue.Forget(objRef)
+		// technically unnecessary, bucket rate limiters don't have item-specific rate-limiting, so this is a noop
+		r.resyncRateLimiter.Forget(objRef)
+		logger.V(4).Info("Successfully synced")
+		return true
+	}
+
+	// There was an error handling the object, log it and requeue with backoff
+	utilruntime.HandleErrorWithContext(ctx, err, "Error syncing; requeuing for later retry")
+	r.workqueue.AddRateLimited(objRef)
+	return true
+}
+
+func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName) error {
+	logger := klog.FromContext(ctx)
+	logger.V(4).Info("reconciling SecretSync object")
+
+	var err error
+	var ss *secretsyncv1alpha1.SecretSync
+	if ss, err = r.ssLister.SecretSyncs(objRef.Namespace).Get(objRef.Name); apierrors.IsNotFound(err) {
+		logger.Info("SecretSync not found, ignoring it")
+		return nil
+	} else if err != nil {
 		logger.Error(err, "unable to fetch SecretSync")
-		return ctrl.Result{}, err
+		return err
 	}
 
 	// if the secret sync hash is empty, it means the secret does not exist, so the condition type is create
@@ -145,94 +272,85 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	if len(ss.Status.Conditions) < 2 {
-		if err := r.initConditions(ctx, ss); err != nil {
-			logger.Error(err, "failed to initialize SecretSync object conditions", "namespace", ss.Namespace, "name", ss.Name)
-			return ctrl.Result{}, err
+		ss = ss.DeepCopy()
+		ss, err = r.initConditions(ctx, ss)
+		if err != nil {
+			logger.Error(err, "failed to initialize SecretSync object conditions")
+			return err
 		}
 	}
 
-	secretName := strings.TrimSpace(ss.Name)
+	secretName := ss.Name
 	secretObj := ss.Spec.SecretObject
 
 	reason, err := r.validateLabelsAnnotations(secretObj)
 	if err != nil {
-		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, err.Error(), true)
-		return ctrl.Result{}, err
+		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, err.Error(), true); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update SecretSync status")
+		}
+		return err
 	}
 
-	// get the secret provider class object
-	spc := &secretsstorecsiv1.SecretProviderClass{}
-	if err := r.client.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
-		logger.Error(err, "failed to get SecretProviderClass", "name", ss.Spec.SecretProviderClassName)
-		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err), true)
-		return ctrl.Result{}, err
+	spc, err := r.secretProviderClassLister.SecretProviderClasses(objRef.Namespace).Get(ss.Spec.SecretProviderClassName)
+	if err != nil { // FIXME: handle not found? -> would have to be able to react to SPC changes
+		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err), true); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update SecretSync status")
+		}
+		return err
 	}
 
 	datamap, reason, err := r.fetchSecretsFromProvider(ctx, logger, spc, ss)
 	if err != nil {
-		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, fmt.Sprintf("fetching secrets from the provider failed: %v", err), true)
-		return ctrl.Result{}, err
+		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, fmt.Sprintf("fetching secrets from the provider failed: %v", err), true); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update SecretSync status")
+		}
+		return err
 	}
 
 	// Compute the hash of the secret
 	syncHash, err := computeCurrentStateHash(datamap, spc, ss)
 	if err != nil {
-		logger.Error(err, "failed to compute state hash", "secretName", secretName) // TODO: could this leak secrets?
-		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSyncError, "failed to compute state hash", true)
-		return ctrl.Result{}, err
+		logger.Error(err, "failed to compute state hash") // TODO: could this leak secrets?
+		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSyncError, "failed to compute state hash", true); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update SecretSync status")
+		}
+		return err
 	}
 
 	// Check if the hash has changed.
 	hashChanged := syncHash != ss.Status.SyncHash
-
-	// Check if a secret create or update failed and if the controller should re-try the operation
-	var failedCondition *metav1.Condition
-	for _, ssCondition := range ss.Status.Conditions {
-		if slices.Contains(FailedConditionsTriggeringRetry, ssCondition.Reason) {
-			failedCondition = &ssCondition
-			break
-		}
+	if !hashChanged {
+		return nil
 	}
 
-	if failedCondition == nil && !hashChanged {
-		return ctrl.Result{}, nil
+	ssCopy := ss.DeepCopy()
+
+	// Attempt to create or update the secret.
+	if err = r.serverSidePatchSecret(ctx, ssCopy, datamap); err != nil {
+		logger.Error(err, "failed to patch secret", "secretName", secretName)
+		if statusUpdateErr := r.updateStatusConditions(ctx, ssCopy, conditionType, metav1.ConditionFalse, ConditionReasonControllerPatchError, fmt.Sprintf("failed to patch secret %q: %v", ssCopy.Name, err), true); statusUpdateErr != nil {
+			logger.Error(statusUpdateErr, "failed to update SecretSync status")
+		}
+		return err
 	}
 
 	if conditionType == ConditionTypeCreate {
-		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionTrue, ConditionReasonCreateSuccessful, ConditionMessageCreateSuccessful, false)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUpdate, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
-	} else if hashChanged {
-		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
+		_ = r.updateStatusConditions(ctx, ssCopy, conditionType, metav1.ConditionTrue, ConditionReasonCreateSuccessful, ConditionMessageCreateSuccessful, false)
 	}
-
-	// Save current state for potential rollback.
-	prevSecretHash := ss.Status.SyncHash
-	prevTime := ss.Status.LastSuccessfulSyncTime
+	_ = r.updateStatusConditions(ctx, ssCopy, ConditionTypeUpdate, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
 
 	// Update status fields.
-	ss.Status.LastSuccessfulSyncTime = &metav1.Time{Time: time.Now()}
-	ss.Status.SyncHash = syncHash
-
-	// Attempt to create or update the secret.
-	if err = r.serverSidePatchSecret(ctx, ss, datamap); err != nil {
-		logger.Error(err, "failed to patch secret", "secretName", secretName)
-
-		// Rollback to the previous hash and the previous last successful sync time.
-		ss.Status.SyncHash = prevSecretHash
-		ss.Status.LastSuccessfulSyncTime = prevTime
-
-		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerPatchError, fmt.Sprintf("failed to patch secret %q: %v", ss.Name, err), true)
-		return ctrl.Result{}, err
-	}
+	ssCopy.Status.LastSuccessfulSyncTime = &metav1.Time{Time: time.Now()}
+	ssCopy.Status.SyncHash = syncHash
 
 	// Update the status.
-	err = r.client.Status().Update(ctx, ss)
+	_, err = r.ssClient.SecretSyncs(objRef.Namespace).UpdateStatus(ctx, ssCopy, metav1.UpdateOptions{})
 	if err != nil {
-		return ctrl.Result{}, err
+		return err
 	}
 
-	logger.V(4).Info("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
-	return ctrl.Result{}, nil
+	logger.V(4).Info("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ssCopy.Status.LastSuccessfulSyncTime)
+	return nil
 }
 
 func (r *SecretSyncReconciler) validateLabelsAnnotations(
@@ -251,7 +369,7 @@ func (r *SecretSyncReconciler) validateLabelsAnnotations(
 
 func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	ctx context.Context,
-	logger logr.Logger,
+	logger klog.Logger,
 	spc *secretsstorecsiv1.SecretProviderClass,
 	ss *secretsyncv1alpha1.SecretSync,
 ) (map[string][]byte, string, error) {
@@ -299,7 +417,7 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 //
 // Returns JSON-serialized parameters, condition reason in case of an error, and the error itself.
 func (r *SecretSyncReconciler) prepareCSIProviderParams(
-	logger logr.Logger,
+	logger klog.Logger,
 	spc *secretsstorecsiv1.SecretProviderClass,
 	namespace,
 	saName string,
@@ -333,10 +451,7 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 
 // serverSidePatchSecret performs a server-side patch on a Kubernetes Secret.
 // It updates the specified secret with the provided data, labels, and annotations.
-func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, datamap map[string][]byte) (err error) {
-	// copy the object to make sure no code below mutates our cache
-	ssCopy := ss.DeepCopy()
-
+func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ssCopy *secretsyncv1alpha1.SecretSync, datamap map[string][]byte) (err error) {
 	controllerLabels := ssCopy.Spec.SecretObject.Labels
 	if controllerLabels == nil {
 		controllerLabels = make(map[string]string, 1)
@@ -356,8 +471,8 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 			Annotations: ssCopy.Spec.SecretObject.Annotations,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: ssCopy.APIVersion,
-					Kind:       ssCopy.Kind,
+					APIVersion: secretsyncv1alpha1.SchemeGroupVersion.String(),
+					Kind:       "SecretSync",
 					Name:       ssCopy.Name,
 					UID:        ssCopy.UID,
 				},
@@ -373,7 +488,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 	}
 
 	// Perform the server-side patch on the Secret.
-	_, err = r.clientset.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager})
+	_, err = r.clients.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager})
 	if err != nil {
 		return err
 	}
@@ -416,96 +531,4 @@ func computeCurrentStateHash(secretData map[string][]byte, spc *secretsstorecsiv
 	dk := pbkdf2.Key(append(secretBytesLenPrefixed, []byte(toHash)...), salt, 100_000, 32, sha512.New)
 
 	return "v1:" + hex.EncodeToString(dk), nil
-}
-
-// processIfSecretChanged checks if the secret sync object has changed.
-func (r *SecretSyncReconciler) processIfSecretChanged(oldObj, newObj client.Object) bool {
-	ssOldObj := oldObj.(*secretsyncv1alpha1.SecretSync)
-	ssNewObj := newObj.(*secretsyncv1alpha1.SecretSync)
-
-	return ssOldObj.Generation != ssNewObj.Generation
-}
-
-// We need to trigger the reconcile function when the secret sync object is created or updated, however
-// we don't need to trigger the reconcile function when the status of the secret sync object is updated.
-func (r *SecretSyncReconciler) shouldReconcilePredicate() predicate.Funcs {
-	return predicate.Funcs{
-		CreateFunc: func(_ event.CreateEvent) bool {
-			return true
-		},
-		UpdateFunc: func(e event.UpdateEvent) bool {
-			return r.processIfSecretChanged(e.ObjectOld, e.ObjectNew)
-		},
-		DeleteFunc: func(_ event.DeleteEvent) bool {
-			return false
-		},
-		GenericFunc: func(_ event.GenericEvent) bool {
-			return true
-		},
-	}
-}
-
-// SetupWithManager sets up the controller with the Manager.
-func (r *SecretSyncReconciler) SetupWithManager(mgr ctrl.Manager, secretsPollingInterval time.Duration) error {
-	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
-		For(&secretsyncv1alpha1.SecretSync{}).
-		WithEventFilter(r.shouldReconcilePredicate())
-
-	if secretsPollingInterval > 0 {
-		periodicChannel, pollingFunc := r.providerPollingFunc(secretsPollingInterval, mgr.GetCache())
-
-		if err := mgr.Add(pollingFunc); err != nil {
-			return err
-		}
-		// events from WatchesRawSource don't go through predicates so this will always cause syncs to trigger
-		controllerBuilder.WatchesRawSource(
-			source.TypedChannel(
-				periodicChannel,
-				&handler.TypedEnqueueRequestForObject[*secretsyncv1alpha1.SecretSync]{},
-			),
-		)
-	}
-
-	return controllerBuilder.Complete(r)
-}
-
-func (r *SecretSyncReconciler) providerPollingFunc(pollInterval time.Duration, informersCache cache.Cache) (chan event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync], manager.RunnableFunc) {
-	periodicChannel := make(chan event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync], 1024)
-
-	return periodicChannel, func(ctx context.Context) error {
-		defer close(periodicChannel)
-
-		if ok := informersCache.WaitForCacheSync(ctx); !ok {
-			return fmt.Errorf("timed out waiting for cache sync")
-		}
-
-		ticker := time.NewTicker(pollInterval)
-		defer ticker.Stop()
-
-		logger := log.FromContext(ctx)
-		for {
-			select {
-			case <-ticker.C:
-				ssList := &secretsyncv1alpha1.SecretSyncList{}
-				if err := r.List(ctx, ssList); err != nil {
-					logger.Error(err, "failed to list SecretSyncs")
-					continue
-				}
-				for idx := range ssList.Items {
-					select {
-					case periodicChannel <- event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync]{Object: ssList.Items[idx].DeepCopy()}:
-					case <-ctx.Done():
-						goto handle_context_done
-					}
-				}
-
-			case <-ctx.Done():
-				goto handle_context_done
-			}
-		}
-
-	handle_context_done:
-		logger.Info("shutting down periodic resync")
-		return nil
-	}
 }
