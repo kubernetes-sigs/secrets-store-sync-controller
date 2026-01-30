@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 
-	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
+	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/controller"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/version"
