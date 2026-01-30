@@ -65,9 +65,6 @@ const (
 	// csiPodServiceAccountName is the name of the pod service account that the mount is created for
 	csiPodServiceAccountName = "csi.storage.k8s.io/serviceAccount.name"
 
-	// csiPodServiceAccountTokens is the service account tokens of the pod that the mount is created for
-	csiPodServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens" //nolint
-
 	// Label applied by the controller to the secret object
 	controllerLabelKey = "secrets-store.sync.x-k8s.io"
 
