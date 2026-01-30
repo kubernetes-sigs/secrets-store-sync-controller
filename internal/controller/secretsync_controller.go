@@ -90,13 +90,34 @@ type AllClientBuilder interface {
 
 // SecretSyncReconciler reconciles a SecretSync object
 type SecretSyncReconciler struct {
-	client.Client
-	Audiences       []string
-	Clientset       kubernetes.Interface
-	Scheme          *runtime.Scheme
-	TokenCache      *token.Manager
-	ProviderClients AllClientBuilder
-	EventRecorder   record.EventRecorder
+	client          client.Client
+	audiences       []string
+	clientset       kubernetes.Interface
+	scheme          *runtime.Scheme
+	tokenCache      *token.Manager
+	providerClients AllClientBuilder
+	eventRecorder   record.EventRecorder
+}
+
+func NewSecretSyncReconciler(
+	controlleRuntimeClient client.Client,
+	scheme *runtime.Scheme,
+	kubeClient kubernetes.Interface,
+	providerClients AllClientBuilder,
+	saTokenAudiences []string,
+) *SecretSyncReconciler {
+	return &SecretSyncReconciler{
+		client: controlleRuntimeClient,
+		scheme: scheme,
+
+		clientset:  kubeClient,
+		tokenCache: token.NewManager(kubeClient),
+		audiences:  saTokenAudiences,
+
+		providerClients: providerClients,
+
+		eventRecorder: record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
+	}
 }
 
 //+kubebuilder:rbac:groups=secret-sync.x-k8s.io,resources=secretsyncs,verbs=get;list;watch
@@ -112,7 +133,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// get the secret sync object
 	ss := &secretsyncv1alpha1.SecretSync{}
-	if err := r.Get(ctx, req.NamespacedName, ss); err != nil {
+	if err := r.client.Get(ctx, req.NamespacedName, ss); err != nil {
 		logger.Error(err, "unable to fetch SecretSync")
 		return ctrl.Result{}, err
 	}
@@ -142,7 +163,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
-	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
+	if err := r.client.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
 		logger.Error(err, "failed to get SecretProviderClass", "name", ss.Spec.SecretProviderClassName)
 		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err), true)
 		return ctrl.Result{}, err
@@ -206,7 +227,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// Update the status.
-	err = r.Client.Status().Update(ctx, ss)
+	err = r.client.Status().Update(ctx, ss)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -236,7 +257,7 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	ss *secretsyncv1alpha1.SecretSync,
 ) (map[string][]byte, string, error) {
 	providerName := string(spc.Spec.Provider)
-	providerClient, err := r.ProviderClients.Get(ctx, providerName)
+	providerClient, err := r.providerClients.Get(ctx, providerName)
 	if err != nil {
 		logger.Error(err, "failed to get provider client", "provider", providerName)
 		return nil, ConditionReasonControllerSpcError, err
@@ -285,7 +306,7 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 	saName string,
 ) ([]byte, string, error) {
 	// get the service account token
-	serviceAccountTokenAttrs, err := token.SecretProviderServiceAccountTokenAttrs(r.TokenCache, namespace, saName, r.Audiences)
+	serviceAccountTokenAttrs, err := token.SecretProviderServiceAccountTokenAttrs(r.tokenCache, namespace, saName, r.audiences)
 	if err != nil {
 		logger.Error(err, "failed to get service account token", "name", saName)
 
@@ -350,7 +371,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 	}
 
 	// Perform the server-side patch on the Secret.
-	_, err = r.Clientset.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager})
+	_, err = r.clientset.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager})
 	if err != nil {
 		return err
 	}
