@@ -21,7 +21,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"k8s.io/klog/v2"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
 )
@@ -69,7 +69,7 @@ var AllowedStringsToDisplayConditionErrorMessage = []string{
 }
 
 func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, conditionType string, conditionStatus metav1.ConditionStatus, conditionReason, conditionMessage string, shouldUpdateStatus bool) {
-	logger := log.FromContext(ctx)
+	logger := klog.FromContext(ctx)
 
 	if ss.Status.Conditions == nil {
 		ss.Status.Conditions = []metav1.Condition{}
@@ -89,7 +89,7 @@ func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *s
 		return
 	}
 
-	if err := r.client.Status().Update(ctx, ss); err != nil {
+	if _, err := r.ssClient.SecretSyncs(ss.Namespace).UpdateStatus(ctx, ss, metav1.UpdateOptions{}); err != nil {
 		logger.Error(err, "Failed to update status", "condition", condition)
 	}
 
@@ -113,5 +113,11 @@ func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyn
 		Reason: ConditionReasonNoUpdateAttemptedYet,
 	})
 
-	return r.client.Status().Update(ctx, ss)
+	ssNew, err := r.ssClient.SecretSyncs(ss.Namespace).UpdateStatus(ctx, ss, metav1.UpdateOptions{})
+	if err != nil {
+		return err
+	}
+
+	*ss = *ssNew
+	return nil
 }
