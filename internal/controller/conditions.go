@@ -89,7 +89,7 @@ func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *s
 		return
 	}
 
-	if err := r.Client.Status().Update(ctx, ss); err != nil {
+	if err := r.client.Status().Update(ctx, ss); err != nil {
 		logger.Error(err, "Failed to update status", "condition", condition)
 	}
 
@@ -113,5 +113,5 @@ func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyn
 		Reason: ConditionReasonNoUpdateAttemptedYet,
 	})
 
-	return r.Client.Status().Update(ctx, ss)
+	return r.client.Status().Update(ctx, ss)
 }
