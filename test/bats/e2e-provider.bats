@@ -75,7 +75,7 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml" \
     "sse2esecret" \
     "SecretCreated" \
-    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": SecretProviderClass.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
+    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": secretproviderclasses.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
     "SecretProviderClassMisconfigured" \
     "False" \
     "spc-namespace" \
