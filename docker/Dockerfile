@@ -13,7 +13,7 @@
 # limitations under the License.
 
 # Build the manager binary with golang:1.25.5 linux/amd64 image
-FROM golang:1.25.5@sha256:22bd1c41c958c762e9633f07a5fee8266300e5f25e18e269a6d87a4b870368aa AS builder
+FROM golang:1.25.7@sha256:cc737435e2742bd6da3b7d575623968683609a3d2e0695f9d85bee84071c08e6 AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
