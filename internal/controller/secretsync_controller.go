@@ -516,8 +516,8 @@ func (r *SecretSyncReconciler) providerPollingFunc(pollInterval time.Duration, i
 					logger.Error(err, "failed to list SecretSyncs")
 					continue
 				}
-				for _, ss := range ssList.Items {
-					periodicChannel <- event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync]{Object: ss.DeepCopy()}
+				for idx := range ssList.Items {
+					periodicChannel <- event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync]{Object: ssList.Items[idx].DeepCopy()}
 				}
 
 			case <-ctx.Done():
