@@ -20,6 +20,7 @@ import (
 	"flag"
 	"os"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
@@ -51,6 +52,7 @@ var (
 	probeAddr               = flag.String("health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
 	tokenRequestAudiences   = flag.String("token-request-audience", "", "Audience for the token request, comma separated.")
 	providerVolumePath      = flag.String("provider-volume", "/provider", "Volume path for provider.")
+	rotationPollInterval    = flag.Duration("rotation-poll-interval", 10*time.Minute, "Polling interval to resync secrets from the provider. Defaults to 2min. To disable provider polling, set it to 0s.")
 	maxCallRecvMsgSize      = flag.Int("max-call-recv-msg-size", 1024*1024*4, "maximum size in bytes of gRPC response from plugins")
 	versionInfo             = flag.Bool("version", false, "Print the version and exit")
 )
@@ -124,7 +126,7 @@ func runMain() error {
 		ProviderClients: providerClients,
 		Audiences:       audiences,
 		EventRecorder:   record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{Component: "secret-sync-controller"}),
-	}).SetupWithManager(mgr); err != nil {
+	}).SetupWithManager(mgr, *rotationPollInterval); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "SecretSync")
 		return err
 	}
