@@ -22,10 +22,10 @@ SLEEP_TIME=1
 }
 
 @test "Test rbac roles and role bindings exist" {
-  run kubectl get clusterrole/secrets-store-sync-controller-manager-role
+  run kubectl get clusterrole/secrets-store-sync-controller-role
   assert_success
 
-  run kubectl get clusterrolebinding/secrets-store-sync-controller-manager-rolebinding
+  run kubectl get clusterrolebinding/secrets-store-sync-controller-rolebinding
   assert_success 
 }
 
