@@ -3,7 +3,7 @@ Generate subjects for role binding and cluster role binding.
 */}}
 {{- define "secrets-store-sync-controller.subjects" -}}
 - kind: ServiceAccount
-  name: "secrets-store-sync-controller-manager"
+  name: "secrets-store-sync-controller"
   namespace: {{ .Release.Namespace }}
 {{- end }}
 

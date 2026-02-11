@@ -7,7 +7,6 @@ metadata:
     app.kubernetes.io/component: rbac
     app.kubernetes.io/created-by: secrets-store-sync-controller
     app.kubernetes.io/part-of: secrets-store-sync-controller
-    app.kubernetes.io/managed-by: kustomize
     secrets-store.io/system: "true"
   name: secrets-store-sync-controller-leader-election-rolebinding
   namespace: {{ .Release.Namespace }}
