@@ -4,11 +4,7 @@ go 1.26.0
 
 require (
 	github.com/google/go-cmp v0.7.0
-	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
-	go.opentelemetry.io/otel v1.43.0
-	go.opentelemetry.io/otel/exporters/prometheus v0.65.0
-	go.opentelemetry.io/otel/sdk/metric v1.43.0
 	golang.org/x/crypto v0.50.0
 	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
@@ -16,9 +12,9 @@ require (
 	k8s.io/apimachinery v0.35.3
 	k8s.io/apiserver v0.35.3
 	k8s.io/client-go v0.35.3
+	k8s.io/controller-manager v0.35.3
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/utils v0.0.0-20260319190234-28399d86e0b5
-	sigs.k8s.io/controller-runtime v0.23.3
 	sigs.k8s.io/secrets-store-csi-driver v1.5.6
 )
 
@@ -82,13 +78,14 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
+	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.67.5 // indirect
-	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/otel v1.43.0 // indirect
 	go.opentelemetry.io/otel/metric v1.43.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.43.0 // indirect
 	go.opentelemetry.io/otel/trace v1.43.0 // indirect
