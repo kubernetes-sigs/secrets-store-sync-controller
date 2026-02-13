@@ -33,7 +33,6 @@ KUSTOMIZE_VERSION ?= v4.5.7
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
 K8S_CODEGEN_VERSION ?= v0.34.3
 KIND_NODE_IMAGE_VERSION ?= v1.32.2
-BATS_VERSION ?= 1.11.0
 SHELLCHECK_VER ?= v0.10.0
 KIND_VERSION ?= v0.27.0
 TRIVY_VERSION ?=  0.52.2
@@ -46,7 +45,6 @@ GOLANGCI_LINT := $(TOOLS_BIN_DIR)/golangci-lint
 HELM := helm
 KIND := kind
 ENVSUBST := envsubst
-BATS := bats
 TRIVY := trivy
 
 # Image URL to use all building/pushing image targets
@@ -183,9 +181,6 @@ helm-manifest-install:
 $(HELM): ## Install helm3 if not present
 	helm version --short | grep -q v3 || (curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash)
 
-$(BATS): ## Install bats for running the tests
-	bats --version | grep -q $(BATS_VERSION) || (curl -sSLO https://github.com/bats-core/bats-core/archive/v${BATS_VERSION}.tar.gz && tar -zxvf v${BATS_VERSION}.tar.gz && bash bats-core-${BATS_VERSION}/install.sh /usr/local)
-
 $(ENVSUBST): ## Install envsubst for running the tests
 	envsubst -V || (apt-get -o Acquire::Retries=30 update && apt-get -o Acquire::Retries=30 install gettext-base -y)
 
@@ -215,6 +210,10 @@ $(TRIVY): ## Install trivy for image vulnerability scan
 .PHONY: go-test # Run unit tests
 go-test:
 	go test -count=1 $(GO_FILES) -v -coverprofile cover.out
+
+.PHONY: run-e2e-provider-tests
+run-e2e-provider-tests:
+	cd ./test/e2e/ && go test -count=1 -timeout 55m -v ./ $(TEST_RUN_ARGS)
 
 .PHONY: image-scan
 image-scan: $(TRIVY)
@@ -252,15 +251,10 @@ shellcheck: $(SHELLCHECK)
 ## --------------------------------------
 
 .PHONY: e2e-setup ## Setup environment for e2e tests
-e2e-setup: $(HELM) $(BATS) $(ENVSUBST) $(KIND)
+e2e-setup: $(HELM) $(ENVSUBST) $(KIND)
 
 .PHONY: e2e-bootstrap
 e2e-bootstrap: e2e-setup docker-build setup-kind-cluster helm-manifest-install ## Bootstrap the e2e environment
-
-# Run the e2e provider tests
-.PHONY: run-e2e-provider-tests
-run-e2e-provider-tests:
-	bats -t -T test/bats/e2e-provider.bats
 
 ## --------------------------------------
 ## Release
