@@ -119,15 +119,5 @@ Run the following command to uninstall the controller:
 helm delete secrets-sync-controller
 ```
 
-<!-- Add this section once we have e2e tests 
-## Test the controller with e2e-provider
-If you want to test the controller with the e2e-provider, follow these steps:
-
-From the root of the project, run the following command to run the e2e tests:
-```sh
-bats test/bats/e2e-provider-ssc.bats
-```
--->
-
 ## Troubleshooting
 The validating admission policies are available for k8s 1.27 and later. If you are using an older version of k8s, you may need to disable the validating admission policies by setting the `validatingAdmissionPolicies.applyPolicies` parameter to `false` in the `secret-sync-controller/secretsync/values.yaml` file.
