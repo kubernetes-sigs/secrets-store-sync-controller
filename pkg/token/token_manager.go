@@ -25,9 +25,11 @@ package token
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
+	"os"
 	"sync"
 	"time"
 
@@ -68,12 +70,31 @@ func NewManager(c clientset.Interface) *Manager {
 		return supported
 	}
 
+	nodeName := os.Getenv("SYNC_CONTROLLER_NODE_NAME")
+	if len(nodeName) == 0 {
+		panic("SYNC_CONTROLLER_NODE_NAME env var is not set")
+	}
+	controllerNode, err := c.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		panic(err)
+	}
+	nodeUID := controllerNode.UID
+
 	m := &Manager{
 		getToken: func(name, namespace string, tr *authenticationv1.TokenRequest) (*authenticationv1.TokenRequest, error) {
 			if c == nil {
 				return nil, errors.New("cannot use TokenManager when kubelet is in standalone mode")
 			}
-			tokenRequest, err := c.CoreV1().ServiceAccounts(namespace).CreateToken(context.TODO(), name, tr, metav1.CreateOptions{})
+
+			tokenRequest := tr.DeepCopy()
+			tokenRequest.Spec.BoundObjectRef = &authenticationv1.BoundObjectReference{
+				APIVersion: "v1",
+				Kind:       "Node",
+				Name:       nodeName,
+				UID:        nodeUID,
+			}
+
+			tokenRequest, err := c.CoreV1().ServiceAccounts(namespace).CreateToken(context.TODO(), name, tokenRequest, metav1.CreateOptions{})
 			if apierrors.IsNotFound(err) && !tokenRequestsSupported() {
 				return nil, fmt.Errorf("the API server does not have TokenRequest endpoints enabled")
 			}
@@ -88,7 +109,6 @@ func NewManager(c clientset.Interface) *Manager {
 
 // Manager manages service account tokens for pods.
 type Manager struct {
-
 	// cacheMutex guards the cache
 	cacheMutex sync.RWMutex
 	cache      map[string]*authenticationv1.TokenRequest
@@ -197,4 +217,50 @@ func keyFunc(name, namespace string, tr *authenticationv1.TokenRequest) string {
 	}
 
 	return fmt.Sprintf("%q/%q/%#v/%#v/%#v", name, namespace, tr.Spec.Audiences, exp, ref)
+}
+
+// SecretProviderServiceAccountTokenAttrs returns the token for the federated service account that can be bound to the pod.
+// This token will be sent to the providers and is of the format:
+//
+//	"csi.storage.k8s.io/serviceAccount.tokens": {
+//	  <audience>: {
+//	    'token': <token>,
+//	    'expirationTimestamp': <expiration timestamp in RFC3339 format>,
+//	  },
+//	  ...
+//	}
+//
+// ref: https://kubernetes-csi.github.io/docs/token-requests.html#usage
+func SecretProviderServiceAccountTokenAttrs(tokenManager *Manager, namespace, serviceAccountName string, audiences []string) (map[string]string, error) {
+	if len(audiences) == 0 {
+		return nil, nil
+	}
+
+	outputs := map[string]authenticationv1.TokenRequestStatus{}
+	var tokenExpirationSeconds int64 = 600
+
+	for _, aud := range audiences {
+		tr := &authenticationv1.TokenRequest{
+			Spec: authenticationv1.TokenRequestSpec{
+				ExpirationSeconds: &tokenExpirationSeconds,
+				Audiences:         []string{aud},
+			},
+		}
+
+		tr, err := tokenManager.GetServiceAccountToken(namespace, serviceAccountName, tr)
+		if err != nil {
+			return nil, err
+		}
+		outputs[aud] = tr.Status
+	}
+
+	klog.V(5).InfoS("Fetched service account token attrs", "serviceAccountName", serviceAccountName, "namespace", namespace)
+	tokens, err := json.Marshal(outputs)
+	if err != nil {
+		return nil, err
+	}
+
+	return map[string]string{
+		"csi.storage.k8s.io/serviceAccount.tokens": string(tokens),
+	}, nil
 }

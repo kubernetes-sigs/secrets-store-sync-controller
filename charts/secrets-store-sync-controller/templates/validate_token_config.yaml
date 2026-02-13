@@ -24,6 +24,6 @@ spec:
   validations:
   - expression: "variables.hasCorrectAudience == true && variables.expirationSeconds == true && variables.requestHasOnlyOneAudience == true"
     message: "'Creating a serviceaccount token has failed because the configuration isn't correct.'"
-    messageExpression: "'secrets-store-sync-controller has failed to ' +  string(request.operation) + ' ' + string(request.name) + ' token in the ' + string(request.namespace) + ' namespace. Check the configuration.'"
+    messageExpression: "'secrets-store-sync-controller has failed to ' +  string(request.operation) + ' ' + \"string(request.name)\" + ' token in the \"' + string(request.namespace) + '\" namespace.'"
     reason: "Forbidden"
 {{- end -}}

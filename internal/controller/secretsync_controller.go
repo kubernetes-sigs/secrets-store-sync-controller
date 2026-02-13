@@ -23,14 +23,16 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/pbkdf2"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,43 +47,40 @@ import (
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/util/secretutil"
 )
 
 const (
-	// CSIPodName is the name of the pod that the mount is created for
-	CSIPodName = "csi.storage.k8s.io/pod.name"
+	// csiPodName is the name of the pod that the mount is created for
+	csiPodName = "csi.storage.k8s.io/pod.name"
 
-	// CSIPodNamespace is the namespace of the pod that the mount is created for
-	CSIPodNamespace = "csi.storage.k8s.io/pod.namespace"
+	// csiPodNamespace is the namespace of the pod that the mount is created for
+	csiPodNamespace = "csi.storage.k8s.io/pod.namespace"
 
-	// CSIPodUID is the UID of the pod that the mount is created for
-	CSIPodUID = "csi.storage.k8s.io/pod.uid"
+	// csiPodUID is the UID of the pod that the mount is created for
+	csiPodUID = "csi.storage.k8s.io/pod.uid"
 
-	// CSIPodServiceAccountName is the name of the pod service account that the mount is created for
-	CSIPodServiceAccountName = "csi.storage.k8s.io/serviceAccount.name"
+	// csiPodServiceAccountName is the name of the pod service account that the mount is created for
+	csiPodServiceAccountName = "csi.storage.k8s.io/serviceAccount.name"
 
-	// CSIPodServiceAccountTokens is the service account tokens of the pod that the mount is created for
-	CSIPodServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens" //nolint
-
-	// Label applied by the controller to the secret object
-	ControllerLabelKey = "secrets-store.sync.x-k8s.io"
+	// csiPodServiceAccountTokens is the service account tokens of the pod that the mount is created for
+	csiPodServiceAccountTokens = "csi.storage.k8s.io/serviceAccount.tokens" //nolint
 
 	// Label applied by the controller to the secret object
-	ControllerAnnotationKey = "secrets-store.sync.x-k8s.io"
+	controllerLabelKey = "secrets-store.sync.x-k8s.io"
 
-	// Version is the version of the secrets store sync controller
-	Version = "v1"
+	// Annotation applied by the controller to the secret object
+	controllerAnnotationKey = "secrets-store.sync.x-k8s.io"
 
-	// SecretSyncControllerFieldManager is the field manager used by the secrets store sync controller
-	SecretSyncControllerFieldManager = Version + "-secrets-store-sync-controller"
+	// secretSyncControllerFieldManager is the field manager used by the secrets store sync controller
+	secretSyncControllerFieldManager = "secrets-store-sync-controller"
 
 	// Environment variables set using downward API to pass as params to the controller
 	// Used to maintain the same logic as the Secrets Store CSI driver
-	SyncControllerPodName = "SYNC_CONTROLLER_POD_NAME"
-	SyncControllerPodUID  = "SYNC_CONTROLLER_POD_UID"
+	syncControllerPodName = "SYNC_CONTROLLER_POD_NAME"
+	syncControllerPodUID  = "SYNC_CONTROLLER_POD_UID"
 )
 
 type AllClientBuilder interface {
@@ -94,7 +93,7 @@ type SecretSyncReconciler struct {
 	Audiences       []string
 	Clientset       kubernetes.Interface
 	Scheme          *runtime.Scheme
-	TokenClient     *k8s.TokenClient
+	TokenCache      *token.Manager
 	ProviderClients AllClientBuilder
 	EventRecorder   record.EventRecorder
 }
@@ -117,9 +116,6 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	// update status conditions
-	r.updateStatusConditions(ctx, ss, "", ConditionTypeUnknown, ConditionReasonUnknown, false)
-
 	// if the secret sync hash is empty, it means the secret does not exist, so the condition type is create
 	// otherwise, the condition type is update
 	conditionType := ConditionTypeUpdate
@@ -127,97 +123,41 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		conditionType = ConditionTypeCreate
 	}
 
+	if len(ss.Status.Conditions) < 2 {
+		if err := r.initConditions(ctx, ss); err != nil {
+			logger.Error(err, "failed to initialize SecretSync object conditions", "namespace", ss.Namespace, "name", ss.Name)
+			return ctrl.Result{}, err
+		}
+	}
+
 	secretName := strings.TrimSpace(ss.Name)
 	secretObj := ss.Spec.SecretObject
 
-	labels, annotations, err := r.prepareLabelsAndAnnotations(ctx, secretObj, ss, conditionType)
+	reason, err := r.validateLabelsAnnotations(secretObj)
 	if err != nil {
-		return ctrl.Result{}, err
-	}
-
-	// get the service account token
-	serviceAccountTokenAttrs, err := r.TokenClient.SecretProviderServiceAccountTokenAttrs(ss.Namespace, ss.Spec.ServiceAccountName, r.Audiences)
-	if err != nil {
-		logger.Error(err, "failed to get service account token", "name", ss.Spec.ServiceAccountName)
-
-		conditionReason := ConditionReasonSecretPatchFailedUnknownError
-		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
-			conditionReason = ConditionReasonValidatingAdmissionPolicyCheckFailed
-		}
-
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, conditionReason, true)
-
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, err.Error(), true)
 		return ctrl.Result{}, err
 	}
 
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
 	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
-		logger.Error(err, "failed to get secret provider class", "name", ss.Spec.SecretProviderClassName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
+		logger.Error(err, "failed to get SecretProviderClass", "name", ss.Spec.SecretProviderClassName)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err), true)
 		return ctrl.Result{}, err
 	}
 
-	// this is to mimic the parameters sent from CSI driver to the provider
-	parameters := make(map[string]string)
-	for k, v := range spc.Spec.Parameters {
-		parameters[k] = v
-	}
-
-	parameters[CSIPodName] = os.Getenv(SyncControllerPodName)
-	parameters[CSIPodUID] = os.Getenv(SyncControllerPodUID)
-	parameters[CSIPodNamespace] = req.Namespace
-	parameters[CSIPodServiceAccountName] = ss.Spec.ServiceAccountName
-
-	for k, v := range serviceAccountTokenAttrs {
-		parameters[k] = v
-	}
-
-	paramsJSON, err := json.Marshal(parameters)
+	datamap, reason, err := r.fetchSecretsFromProvider(ctx, logger, spc, ss)
 	if err != nil {
-		logger.Error(err, "failed to marshal parameters")
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
-	}
-
-	providerName := string(spc.Spec.Provider)
-	providerClient, err := r.ProviderClients.Get(ctx, providerName)
-	if err != nil {
-		logger.Error(err, "failed to get provider client", "provider", providerName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerSpcError, true)
-		return ctrl.Result{}, err
-	}
-
-	secretRefData := make(map[string]string)
-	var secretsJSON []byte
-	secretsJSON, err = json.Marshal(secretRefData)
-	if err != nil {
-		logger.Error(err, "failed to marshal secret")
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonControllerInternalError, true)
-		return ctrl.Result{}, err
-	}
-
-	oldObjectVersions := make(map[string]string)
-
-	objectVersions, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
-	if err != nil {
-		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedProviderError, true)
-		return ctrl.Result{}, err
-	}
-
-	secretType := secretutil.GetSecretType(strings.TrimSpace(secretObj.Type))
-	var datamap map[string][]byte
-	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
-		logger.Error(err, "failed to get secret data", "secretName", secretName)
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, fmt.Sprintf("fetching secrets from the provider failed: %v", err), true)
 		return ctrl.Result{}, err
 	}
 
 	// Compute the hash of the secret
-	syncHash, err := r.computeSecretDataObjectHash(datamap, spc, ss)
+	syncHash, err := computeCurrentStateHash(datamap, spc, ss)
 	if err != nil {
-		logger.Error(err, "failed to compute secret data object hash", "secretName", secretName)
+		logger.Error(err, "failed to compute state hash", "secretName", secretName) // TODO: could this leak secrets?
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSyncError, "failed to compute state hash", true)
 		return ctrl.Result{}, err
 	}
 
@@ -225,23 +165,23 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	hashChanged := syncHash != ss.Status.SyncHash
 
 	// Check if a secret create or update failed and if the controller should re-try the operation
-	failedCondition := metav1.Condition{}
+	var failedCondition *metav1.Condition
 	for _, ssCondition := range ss.Status.Conditions {
 		if slices.Contains(FailedConditionsTriggeringRetry, ssCondition.Reason) {
-			failedCondition = ssCondition
+			failedCondition = &ssCondition
 			break
 		}
 	}
 
-	if len(failedCondition.Type) == 0 && !hashChanged {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateNoValueChangeSucceeded, true)
+	if failedCondition == nil && !hashChanged {
 		return ctrl.Result{}, nil
 	}
 
 	if conditionType == ConditionTypeCreate {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonCreateSucceeded, false)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionTrue, ConditionReasonCreateSuccessful, ConditionMessageCreateSuccessful, false)
+		r.updateStatusConditions(ctx, ss, ConditionTypeUpdate, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
 	} else if hashChanged {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateValueChangeOrForceUpdateSucceeded, false)
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
 	}
 
 	// Save current state for potential rollback.
@@ -252,36 +192,16 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	ss.Status.LastSuccessfulSyncTime = &metav1.Time{Time: time.Now()}
 	ss.Status.SyncHash = syncHash
 
-	if len(failedCondition.Type) != 0 {
-		meta.RemoveStatusCondition(&ss.Status.Conditions, failedCondition.Type)
-	}
-
 	// Attempt to create or update the secret.
-	if err = r.serverSidePatchSecret(ctx, ss, secretName, req.Namespace, datamap, objectVersions, labels, annotations, secretType); err != nil {
+	if err = r.serverSidePatchSecret(ctx, ss, datamap); err != nil {
 		logger.Error(err, "failed to patch secret", "secretName", secretName)
 
 		// Rollback to the previous hash and the previous last successful sync time.
 		ss.Status.SyncHash = prevSecretHash
 		ss.Status.LastSuccessfulSyncTime = prevTime
 
-		// Reset the create or update conditions
-		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeCreate)
-		meta.RemoveStatusCondition(&ss.Status.Conditions, ConditionTypeUpdate)
-
-		cond := ConditionReasonSecretPatchFailedUnknownError
-		if checkIfErrorMessageCanBeDisplayed(err.Error()) {
-			cond = ConditionReasonValidatingAdmissionPolicyCheckFailed
-		}
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, cond, true)
-
+		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerPatchError, fmt.Sprintf("failed to patch secret %q: %v", ss.Name, err), true)
 		return ctrl.Result{}, err
-	}
-
-	// No errors found, remove the failed conditions.
-	for _, cond := range ss.Status.Conditions {
-		if slices.Contains(FailedConditionsTriggeringRetry, cond.Reason) {
-			meta.RemoveStatusCondition(&ss.Status.Conditions, cond.Type)
-		}
 	}
 
 	// Update the status.
@@ -294,68 +214,122 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	return ctrl.Result{}, nil
 }
 
-func (r *SecretSyncReconciler) prepareLabelsAndAnnotations(
-	ctx context.Context,
+func (r *SecretSyncReconciler) validateLabelsAnnotations(
 	secretObj secretsyncv1alpha1.SecretObject,
-	ss *secretsyncv1alpha1.SecretSync,
-	conditionType string,
-) (map[string]string, map[string]string, error) {
-	labels := make(map[string]string)
-	for k, v := range secretObj.Labels {
-		labels[k] = v
+) (string, error) {
+	if val, ok := secretObj.Labels[controllerLabelKey]; ok && len(val) > 0 {
+		return ConditionReasonFailedInvalidLabelError, fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", controllerLabelKey)
 	}
 
-	if val, ok := labels[ControllerLabelKey]; ok && len(val) > 0 {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedInvalidLabelError, true)
-		return nil, nil, fmt.Errorf("label %s is reserved for use by the Secrets Store Sync Controller", ControllerLabelKey)
-	}
-	labels[ControllerLabelKey] = ""
-
-	annotations := make(map[string]string)
-	for k, v := range secretObj.Annotations {
-		annotations[k] = v
+	if _, ok := secretObj.Annotations[controllerAnnotationKey]; ok {
+		return ConditionReasonFailedInvalidAnnotationError, fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", controllerAnnotationKey)
 	}
 
-	if val, ok := annotations[ControllerAnnotationKey]; ok && len(val) > 0 {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonFailedInvalidAnnotationError, true)
-		return nil, nil, fmt.Errorf("annotation %s is reserved for use by the Secrets Store Sync Controller", ControllerAnnotationKey)
-	}
-	annotations[ControllerAnnotationKey] = ""
-
-	return labels, annotations, nil
+	return "", nil
 }
 
-// checkIfErrorMessageCanBeDisplayed checks if the error message can be displayed in the condition message
-// based on the allowed strings to display condition error message defined in the conditions.go file.
-func checkIfErrorMessageCanBeDisplayed(errorMessage string) bool {
-	for _, allowedString := range AllowedStringsToDisplayConditionErrorMessage {
-		if strings.Contains(strings.ToLower(errorMessage), allowedString) {
-			return true
-		}
+func (r *SecretSyncReconciler) fetchSecretsFromProvider(
+	ctx context.Context,
+	logger logr.Logger,
+	spc *secretsstorecsiv1.SecretProviderClass,
+	ss *secretsyncv1alpha1.SecretSync,
+) (map[string][]byte, string, error) {
+	providerName := string(spc.Spec.Provider)
+	providerClient, err := r.ProviderClients.Get(ctx, providerName)
+	if err != nil {
+		logger.Error(err, "failed to get provider client", "provider", providerName)
+		return nil, ConditionReasonControllerSpcError, err
 	}
-	return false
+
+	paramsJSON, reason, err := r.prepareCSIProviderParams(logger, spc, ss.Namespace, ss.Spec.ServiceAccountName)
+	if err != nil {
+		return nil, reason, err
+	}
+
+	secretRefData := make(map[string]string)
+	var secretsJSON []byte
+	secretsJSON, err = json.Marshal(secretRefData)
+	if err != nil {
+		logger.Error(err, "failed to marshal secret")
+		return nil, ConditionReasonControllerSyncError, err
+	}
+
+	oldObjectVersions := make(map[string]string)
+	_, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
+	if err != nil {
+		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
+		return nil, ConditionReasonFailedProviderError, err
+	}
+
+	secretObj := ss.Spec.SecretObject
+	secretType := corev1.SecretType(secretObj.Type)
+	var datamap map[string][]byte
+	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
+		logger.Error(err, "failed to get secret data", "secretName", ss.Name)
+		return nil, ConditionReasonRemoteSecretStoreFetchFailed, err
+	}
+
+	return datamap, "", nil
+}
+
+// prepareCSIProviderPerams prepares the parameters that would normally be sent to
+// the provider by the CSI driver.
+// This function will attempt to fetch SA token unless it is cached.
+//
+// Returns JSON-serialized parameters, condition reason in case of an error, and the error itself.
+func (r *SecretSyncReconciler) prepareCSIProviderParams(
+	logger logr.Logger,
+	spc *secretsstorecsiv1.SecretProviderClass,
+	namespace,
+	saName string,
+) ([]byte, string, error) {
+	// get the service account token
+	serviceAccountTokenAttrs, err := token.SecretProviderServiceAccountTokenAttrs(r.TokenCache, namespace, saName, r.Audiences)
+	if err != nil {
+		logger.Error(err, "failed to get service account token", "name", saName)
+
+		return nil, ConditionReasonControllerSyncError, err
+	}
+
+	// this is to mimic the parameters sent from CSI driver to the provider
+	parameters := maps.Clone(spc.Spec.Parameters)
+
+	parameters[csiPodName] = os.Getenv(syncControllerPodName)
+	parameters[csiPodUID] = os.Getenv(syncControllerPodUID)
+	parameters[csiPodNamespace] = namespace
+	parameters[csiPodServiceAccountName] = saName
+
+	maps.Copy(parameters, serviceAccountTokenAttrs)
+
+	paramsJSON, err := json.Marshal(parameters)
+	if err != nil {
+		logger.Error(err, "failed to marshal parameters")
+		return nil, ConditionReasonControllerSyncError, err
+	}
+
+	return paramsJSON, "", nil
 }
 
 // serverSidePatchSecret performs a server-side patch on a Kubernetes Secret.
 // It updates the specified secret with the provided data, labels, and annotations.
-func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, name, namespace string, datamap map[string][]byte, _, labels, annotations map[string]string, secretType corev1.SecretType) (err error) {
-	secretKind := "Secret"
-	secretVersion := "v1"
-
-	// Retrieve Kubernetes clientset.
-	coreV1Client := r.Clientset.CoreV1()
+func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, datamap map[string][]byte) (err error) {
+	controllerLabels := maps.Clone(ss.Spec.SecretObject.Labels)
+	if controllerLabels == nil {
+		controllerLabels = make(map[string]string, 1)
+	}
+	controllerLabels[controllerLabelKey] = ""
 
 	// Construct the patch for updating the Secret.
 	secretPatchData := corev1.Secret{
 		TypeMeta: metav1.TypeMeta{
-			Kind:       secretKind,
-			APIVersion: secretVersion,
+			Kind:       "Secret",
+			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        name,
-			Namespace:   namespace,
-			Labels:      labels,
-			Annotations: annotations,
+			Name:        ss.Name,
+			Namespace:   ss.Namespace,
+			Labels:      controllerLabels,
+			Annotations: ss.Spec.SecretObject.Annotations,
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion: ss.APIVersion,
@@ -366,7 +340,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 			},
 		},
 		Data: datamap,
-		Type: secretType,
+		Type: corev1.SecretType(ss.Spec.SecretObject.Type),
 	}
 
 	patchData, err := json.Marshal(secretPatchData)
@@ -375,7 +349,7 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 	}
 
 	// Perform the server-side patch on the Secret.
-	_, err = coreV1Client.Secrets(namespace).Patch(ctx, name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: SecretSyncControllerFieldManager})
+	_, err = r.Clientset.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager})
 	if err != nil {
 		return err
 	}
@@ -385,45 +359,28 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ss *se
 
 // computeSecretDataObjectHash computes the HMAC hash of the provided secret data
 // using the SS UID as the key.
-func (r *SecretSyncReconciler) computeSecretDataObjectHash(secretData map[string][]byte, spc *secretsstorecsiv1.SecretProviderClass, ss *secretsyncv1alpha1.SecretSync) (string, error) {
+func computeCurrentStateHash(secretData map[string][]byte, spc *secretsstorecsiv1.SecretProviderClass, ss *secretsyncv1alpha1.SecretSync) (string, error) {
 	// Serialize the secret data, parts of the spc and the ss data.
 	secretBytes, err := json.Marshal(secretData)
 	if err != nil {
 		return "", err
 	}
 
-	spcBytesUID, err := json.Marshal(spc.UID)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, spcBytesUID...)
-
-	spcBytesGeneration, err := json.Marshal(spc.ObjectMeta.Generation)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, spcBytesGeneration...)
-
-	ssBytesUID, err := json.Marshal(ss.UID)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, ssBytesUID...)
-
-	ssBytesGeneration, err := json.Marshal(ss.ObjectMeta.Generation)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, ssBytesGeneration...)
-
-	ssBytesForceSync, err := json.Marshal(ss.Spec.ForceSynchronization)
-	if err != nil {
-		return "", err
-	}
-	secretBytes = append(secretBytes, ssBytesForceSync...)
+	toHash := strings.Join(
+		[]string{
+			// SecretProviderClass bits
+			string(spc.UID),
+			strconv.FormatInt(spc.ObjectMeta.Generation, 10),
+			// SecretSync bits
+			string(ss.UID),
+			strconv.FormatInt(ss.ObjectMeta.Generation, 10),
+			ss.Spec.ForceSynchronization,
+		},
+		"|",
+	)
 
 	salt := []byte(string(ss.UID))
-	dk := pbkdf2.Key(secretBytes, salt, 100_000, 32, sha512.New)
+	dk := pbkdf2.Key(append(secretBytes, []byte(toHash)...), salt, 100_000, 32, sha512.New)
 
 	// Create a new HMAC instance with SHA-56 as the hash type and the pbkdf2 key.
 	hmac := hmac.New(sha512.New, dk)
@@ -435,7 +392,6 @@ func (r *SecretSyncReconciler) computeSecretDataObjectHash(secretData map[string
 
 	// Get the final HMAC hash in hexadecimal format.
 	dataHmac := hmac.Sum(nil)
-	dataHmac = append([]byte(Version), dataHmac...)
 	hmacHex := hex.EncodeToString(dataHmac)
 
 	return hmacHex, nil
