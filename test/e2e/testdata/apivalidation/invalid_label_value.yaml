@@ -2,6 +2,9 @@ apiVersion: secret-sync.x-k8s.io/v1alpha1
 kind: SecretSync
 metadata:
   name: sse2einvalidlabelsecret
+  annotations:
+    e2e.test-name: "label value too long"
+    e2e.test-expected-error: "SecretSync.secret-sync.x-k8s.io \"sse2einvalidlabelsecret\" is invalid: spec.secretObject.labels: Invalid value: \"object\": Label keys must not exceed 317 characters (254 for prefix+separator, 63 for name), label values must not exceed 63 characters."
 spec:
   serviceAccountName: default
   secretProviderClassName: e2e-providerspc
