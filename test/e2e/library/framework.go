@@ -18,7 +18,6 @@ import (
 )
 
 type Framework struct {
-	t       *testing.T
 	clients *testClientSet
 }
 
@@ -35,7 +34,6 @@ func NewFramework(ctx context.Context, t *testing.T, clientConfig *rest.Config) 
 	clients := NewTestClientSet(testClientConfig)
 
 	return &Framework{
-		t:       t,
 		clients: clients,
 	}
 }
@@ -69,14 +67,17 @@ func (s *testClientSet) SecretProviderClasses(namespace string) dynamic.Resource
 	return s.dynamic.Resource(secretsstorecsiv1.SchemeGroupVersion.WithResource("secretproviderclasses")).Namespace(namespace)
 }
 
-func (f *Framework) RunTest(name string, runner func(t *testing.T, testCfg *TestConfig)) {
-	f.t.Run(name, func(t *testing.T) {
+func (f *Framework) RunTest(t *testing.T, name string, runner func(t *testing.T, testCfg *TestConfig)) {
+	t.Run(name, func(t *testing.T) {
 		testCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
 		ns, err := f.clients.KubeClients().CoreV1().Namespaces().Create(testCtx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: strings.ReplaceAll(strings.ToLower(name), " ", "-") + "-",
+				Labels: map[string]string{
+					"e2e.test": "secrets-store-sync-controller",
+				},
 			},
 		}, metav1.CreateOptions{})
 

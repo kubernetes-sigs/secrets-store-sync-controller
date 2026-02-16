@@ -12,6 +12,7 @@ import (
 var tests = map[string]func(t *testing.T, f *e2elib.Framework){
 	"SecretSyncsFailures": controller.TestSecretSyncsFailures,
 	"SecretSyncSuccess":   controller.TestSecretSyncSuccess,
+	"ControllerResync":    controller.TestControllerResync,
 	"APIValidation":       apivalidations.TestAPIValidation,
 }
 
