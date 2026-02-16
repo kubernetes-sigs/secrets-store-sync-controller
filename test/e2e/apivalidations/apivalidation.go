@@ -20,7 +20,7 @@ func TestAPIValidation(t *testing.T, f *e2elib.Framework) {
 	tests := testdata.GetAPIValidationTestsOrDie()
 
 	for _, tc := range tests {
-		f.RunTest(tc.Annotations[testNameAnnotationKey], func(t *testing.T, testCfg *e2elib.TestConfig) {
+		f.RunTest(t, tc.Annotations[testNameAnnotationKey], func(t *testing.T, testCfg *e2elib.TestConfig) {
 			testCtx, cancel := context.WithTimeout(testCfg.Context, 5*time.Second)
 			defer cancel()
 
