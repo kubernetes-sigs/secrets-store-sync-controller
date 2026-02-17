@@ -211,6 +211,10 @@ $(TRIVY): ## Install trivy for image vulnerability scan
 go-test:
 	go test -count=1 $(GO_FILES) -v -coverprofile cover.out
 
+# You can run a sing test or a suite by specifying TEST_RUN_ARGS such as:
+#
+# TEST_RUN_ARGS='-run Test/APIValidation' make run-e2e-provider-tests
+#
 .PHONY: run-e2e-provider-tests
 run-e2e-provider-tests:
 	cd ./test/e2e/ && go test -count=1 -timeout 55m -v ./ $(TEST_RUN_ARGS)
