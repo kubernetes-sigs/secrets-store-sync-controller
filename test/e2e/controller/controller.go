@@ -166,7 +166,7 @@ func TestControllerResync(t *testing.T, f *e2elib.Framework) {
 				s.Data["baz"] = []byte("this should stay")
 			},
 			modifySecretSync: func(ss *secretsyncv1alpha1.SecretSync) {
-				ss.Spec.ForceSynchronization = "update now!"
+				ss.Spec.ForceSynchronization = "UpdateNow"
 			},
 			expectedSecret: &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
@@ -217,7 +217,7 @@ func TestControllerResync(t *testing.T, f *e2elib.Framework) {
 				},
 			},
 			modifySecretSync: func(ss *secretsyncv1alpha1.SecretSync) {
-				ss.Spec.ForceSynchronization = "fail the secret"
+				ss.Spec.ForceSynchronization = "FailTheSecret"
 			},
 			expectedCondition: &metav1.Condition{
 				Type:    "SecretUpdated",
