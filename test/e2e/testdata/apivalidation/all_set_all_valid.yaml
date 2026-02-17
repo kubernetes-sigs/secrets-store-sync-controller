@@ -1,0 +1,22 @@
+apiVersion: secret-sync.x-k8s.io/v1alpha1
+kind: SecretSync
+metadata:
+  name: test-secret-sync
+  annotations:
+    e2e.test-name: "all set all valid"
+spec:
+  secretSyncControllerName: |
+    there appears to be no validation on this field whatsoever and so why not
+    just go out our way and set it to whatever! Life's good <yay> Eat a lot of
+    fruits and vegetables, drink wine, go home and make babies!
+  secretProviderClassName: thisone-wont-take-uppercase
+  serviceAccountName: no-uppercase-here-either
+  secretObject:
+    type: ValidSecretType
+    data:
+      - sourcePath: foo
+        targetKey:  bar
+    labels:
+      just.a/normal.label: "and-its-value"
+      normal-annotation: Fill in your text here if you dare!
+    forceSynchronization: "ThisOneShouldBeCapableOfUpperCases-AndAlsoDates.1989-11-17"
