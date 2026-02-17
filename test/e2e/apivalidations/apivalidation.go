@@ -2,6 +2,7 @@ package apivalidations
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 
 const (
 	testNameAnnotationKey = "e2e.test-name"
-	testExpectedErrorKey  = "e2e.test-expected-error"
+	testExpectedErrorKey  = "e2e.test-expected-errors"
 )
 
 func TestAPIValidation(t *testing.T, f *e2elib.Framework) {
@@ -24,19 +25,27 @@ func TestAPIValidation(t *testing.T, f *e2elib.Framework) {
 			testCtx, cancel := context.WithTimeout(testCfg.Context, 5*time.Second)
 			defer cancel()
 
-			expectedError := tc.Annotations[testExpectedErrorKey]
-
+			var expectedErrors []string
+			if errAnnotations, ok := tc.Annotations[testExpectedErrorKey]; ok {
+				expectedErrors = strings.Split(errAnnotations, "\n")
+			}
 			_, err := testCfg.Clients.SSClient().SecretSyncV1alpha1().SecretSyncs(testCfg.Namespace).Create(testCtx, tc, metav1.CreateOptions{})
-			if len(expectedError) != 0 && err == nil {
-				t.Fatalf("expected error but it did not occur: %s", expectedError)
+			if len(expectedErrors) != 0 && err == nil {
+				t.Fatalf("expected error but it did not occur: %s", expectedErrors)
 			}
 
-			if len(expectedError) == 0 && err != nil {
+			if len(expectedErrors) == 0 && err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 
-			if len(expectedError) > 0 && err != nil && expectedError != err.Error() {
-				t.Fatalf("expected error: %q, but got: %v", expectedError, err)
+			for _, expectedError := range expectedErrors {
+				if len(expectedError) == 0 {
+					continue
+				}
+
+				if !strings.Contains(err.Error(), expectedError) {
+					t.Fatalf("expected: %q, to contain: %v", err.Error(), expectedError)
+				}
 			}
 
 		})
