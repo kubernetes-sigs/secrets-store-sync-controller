@@ -17,7 +17,8 @@ import (
 )
 
 type Framework struct {
-	clients *testClientSet
+	clientConfig *rest.Config
+	clients      *testClientSet
 }
 
 type TestConfig struct {
@@ -38,7 +39,8 @@ func NewFramework(t *testing.T) *Framework {
 	clients := NewTestClientSet(testClientConfig)
 
 	return &Framework{
-		clients: clients,
+		clientConfig: clientConfig,
+		clients:      clients,
 	}
 }
 
@@ -72,6 +74,9 @@ func (s *testClientSet) SSClient() secretsyncclient.Interface { return s.ssClien
 func (s *testClientSet) SecretProviderClasses() secretscsiclientv1.SecretProviderClassesGetter {
 	return s.secretsCSIClient
 }
+
+func (f *Framework) ClientConfig() *rest.Config { return rest.CopyConfig(f.clientConfig) }
+func (f *Framework) Clients() TestClientSet     { return f.clients }
 
 func (f *Framework) RunTest(t *testing.T, name string, runner func(t *testing.T, testCfg *TestConfig)) {
 	t.Run(name, func(t *testing.T) {
