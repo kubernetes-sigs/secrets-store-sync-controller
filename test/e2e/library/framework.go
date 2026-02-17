@@ -18,7 +18,8 @@ import (
 )
 
 type Framework struct {
-	clients *testClientSet
+	clientConfig *rest.Config
+	clients      *testClientSet
 }
 
 type TestConfig struct {
@@ -34,7 +35,8 @@ func NewFramework(ctx context.Context, t *testing.T, clientConfig *rest.Config) 
 	clients := NewTestClientSet(testClientConfig)
 
 	return &Framework{
-		clients: clients,
+		clientConfig: clientConfig,
+		clients:      clients,
 	}
 }
 
@@ -66,6 +68,9 @@ func (s *testClientSet) SSClient() secretsyncclient.Interface { return s.ssClien
 func (s *testClientSet) SecretProviderClasses(namespace string) dynamic.ResourceInterface {
 	return s.dynamic.Resource(secretsstorecsiv1.SchemeGroupVersion.WithResource("secretproviderclasses")).Namespace(namespace)
 }
+
+func (f *Framework) ClientConfig() *rest.Config { return rest.CopyConfig(f.clientConfig) }
+func (f *Framework) Clients() TestClientSet     { return f.clients }
 
 func (f *Framework) RunTest(t *testing.T, name string, runner func(t *testing.T, testCfg *TestConfig)) {
 	t.Run(name, func(t *testing.T) {
