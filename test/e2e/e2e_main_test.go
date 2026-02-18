@@ -10,12 +10,13 @@ import (
 )
 
 var tests = map[string]func(t *testing.T, f *e2elib.Framework){
-	"SecretSyncsFailures":               controller.TestSecretSyncsFailures,
-	"SecretSyncSuccess":                 controller.TestSecretSyncSuccess,
-	"ControllerResync":                  controller.TestControllerResync,
-	"Policies/CreateUpdateSecretsTypes": controller.TestCreateUpdateSecretsTypes,
-	"Policies/DeleteSecrets":            controller.TestDeleteSecrets,
-	"APIValidation":                     apivalidations.TestAPIValidation,
+	"SecretSyncsFailures":                      controller.TestSecretSyncsFailures,
+	"SecretSyncSuccess":                        controller.TestSecretSyncSuccess,
+	"ControllerResync":                         controller.TestControllerResync,
+	"Policies/CreateUpdateSecretsTypes-Create": controller.TestCreateUpdateSecretsTypes_Create,
+	"Policies/CreateUpdateSecretsTypes-Patch":  controller.TestCreateUpdateSecretsTypes_Patch,
+	"Policies/DeleteSecrets":                   controller.TestDeleteSecrets,
+	"APIValidation":                            apivalidations.TestAPIValidation,
 }
 
 func Test(t *testing.T) {

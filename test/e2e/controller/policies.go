@@ -14,50 +14,49 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 
-	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
-	secretsyncv1alphaclient "sigs.k8s.io/secrets-store-sync-controller/client/clientset/versioned/typed/secretsync/v1alpha1"
-
 	e2elib "sigs.k8s.io/secrets-store-sync-controller/test/e2e/library"
-	"sigs.k8s.io/secrets-store-sync-controller/test/e2e/testdata"
 )
 
-func TestCreateUpdateSecretsTypes(t *testing.T, f *e2elib.Framework) {
+const (
+	createUpdateErrMsg = "secrets \"{NAME}\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding " +
+		"'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret " +
+		"with Opaque type in the {NAMESPACE} namespace. The controller can only create or update secrets in the allowed types list with a single secretsync owner."
+)
+
+func TestCreateUpdateSecretsTypes_Create(t *testing.T, f *e2elib.Framework) {
 	controllerKubeClients := kubernetes.NewForConfigOrDie(getControllerClientConfig(t, f))
 
-	for _, tc := range []struct {
-		name        string
-		secret      *corev1.Secret
-		expectedErr *string
+	tests := []struct {
+		name            string
+		secretModifiers func(sb *secretBuilder) *corev1.Secret
+		expectedErr     *string
 	}{
 		{
-			name:   "owner references - none exist",
-			secret: newSecretBuilder("no-owner-refs").Done(),
+			name:            "owner references - none exist",
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret { return sb.Done() },
 			expectedErr: ptr.To(
-				"secrets \"no-owner-refs\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding " +
+				"secrets \"{NAME}\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding " +
 					"'secrets-store-sync-controller-create-update-policy-binding' denied request: expression 'variables.allowedSecretTypes == true && " +
 					"variables.hasOneSecretSyncOwner == true' resulted in error: composited variable \"hasOneSecretSyncOwner\" fails to evaluate: no such key: ownerReferences",
 			),
 		},
 		{
 			name: "owner references - wrong kind",
-			secret: newSecretBuilder("ownererefs-wrong-kind").
-				withOwnerRefs([]metav1.OwnerReference{{
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
 					APIVersion: "rbac.authorization.k8s.io/v1",
 					Kind:       "User",
 					Name:       "ownererefs-wrong-kind",
 					UID:        "someuid",
-				}}).
-				Done(),
-			expectedErr: ptr.To(
-				"secrets \"ownererefs-wrong-kind\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding " +
-					"'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret " +
-					"with Opaque type in the {NAMESPACE_NAME_HERE} namespace. The controller can only create or update secrets in the allowed types list with a single secretsync owner.",
-			),
+				}},
+				).Done()
+			},
+			expectedErr: ptr.To(createUpdateErrMsg),
 		},
 		{
 			name: "owner references - two refs",
-			secret: newSecretBuilder("two-owner-refs").
-				withOwnerRefs([]metav1.OwnerReference{{
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
 					APIVersion: "secret-sync.x-k8s.io/v1",
 					Kind:       "SecretSync",
 					Name:       "two-owner-refs",
@@ -67,56 +66,163 @@ func TestCreateUpdateSecretsTypes(t *testing.T, f *e2elib.Framework) {
 					Kind:       "SecretSync",
 					Name:       "two-owner-refs",
 					UID:        "someuid",
-				}}).
-				Done(),
-			expectedErr: ptr.To(
-				"secrets \"two-owner-refs\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding " +
-					"'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret " +
-					"with Opaque type in the {NAMESPACE_NAME_HERE} namespace. The controller can only create or update secrets in the allowed types list with a single secretsync owner.",
-			),
+				}},
+				).Done()
+			},
+			expectedErr: ptr.To(createUpdateErrMsg),
 		},
 		{
 			name: "create a ServiceAccount secret",
-			secret: newSecretBuilder("sa-type-secret").
-				withOwnerRefs([]metav1.OwnerReference{{
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
 					APIVersion: "secret-sync.x-k8s.io/v1",
 					Kind:       "SecretSync",
 					Name:       "sa-type-secret",
 					UID:        "someuid",
 				}}).
-				withType(corev1.SecretTypeServiceAccountToken).
-				withAnnotations(map[string]string{corev1.ServiceAccountNameKey: "default"}).
-				Done(),
-			expectedErr: ptr.To("secrets \"sa-type-secret\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' " +
+					withType(corev1.SecretTypeServiceAccountToken).
+					withAnnotations(map[string]string{corev1.ServiceAccountNameKey: "default"}).
+					Done()
+			},
+			expectedErr: ptr.To("secrets \"{NAME}\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' " +
 				"with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to " +
-				"CREATE secret with kubernetes.io/service-account-token type in the {NAMESPACE_NAME_HERE} namespace. The controller is " +
+				"CREATE secret with kubernetes.io/service-account-token type in the {NAMESPACE} namespace. The controller is " +
 				"not allowed to create or update secrets with this type."),
 		},
 		{
 			name: "create a secret with a type that is not explicitly allowed",
-			secret: newSecretBuilder("type-not-allowed").
-				withOwnerRefs([]metav1.OwnerReference{{
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
 					APIVersion: "secret-sync.x-k8s.io/v1",
 					Kind:       "SecretSync",
 					Name:       "type-not-allowed",
 					UID:        "someuid",
 				}}).
-				withType("very.random/custom-type").
-				Done(),
-			expectedErr: ptr.To("secrets \"type-not-allowed\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with " +
+					withType("very.random/custom-type").
+					Done()
+			},
+			expectedErr: ptr.To("secrets \"{NAME}\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with " +
 				"binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret" +
-				" with very.random/custom-type type in the {NAMESPACE_NAME_HERE} namespace. The controller can only create or update secrets in the allowed types" +
+				" with very.random/custom-type type in the {NAMESPACE} namespace. The controller can only create or update secrets in the allowed types" +
 				" list with a single secretsync owner."),
 		},
-	} {
-		f.RunTest(t, tc.name, func(t *testing.T, testCfg *e2elib.TestConfig) {
-			_, gotErr := controllerKubeClients.CoreV1().Secrets(testCfg.Namespace).Create(testCfg.Context, tc.secret, metav1.CreateOptions{})
+	}
+
+	for _, tc := range tests {
+		f.RunTest(t, "CREATE "+tc.name, func(t *testing.T, testCfg *e2elib.TestConfig) {
+			testSecret := tc.secretModifiers(newSecretBuilder("test-secret"))
+
+			_, gotErr := controllerKubeClients.CoreV1().Secrets(testCfg.Namespace).Create(testCfg.Context, testSecret, metav1.CreateOptions{})
 			if (tc.expectedErr != nil) != (gotErr != nil) {
 				t.Fatalf("expectedErr: %v; got: %v", tc.expectedErr, gotErr)
 			}
 
 			if tc.expectedErr != nil {
-				expectedError := strings.Replace(*tc.expectedErr, "{NAMESPACE_NAME_HERE}", testCfg.Namespace, 1)
+				expectedError := replaceInAuthorizationMessages(*tc.expectedErr, testCfg.Namespace, testSecret.Name, "CREATE")
+				if gotErr.Error() != expectedError {
+					t.Fatalf("expectedErr: %v; got: %v", expectedError, gotErr)
+				}
+			}
+		})
+	}
+}
+
+func TestCreateUpdateSecretsTypes_Patch(t *testing.T, f *e2elib.Framework) {
+	controllerKubeClients := kubernetes.NewForConfigOrDie(getControllerClientConfig(t, f))
+
+	tests := []struct {
+		name            string
+		secretModifiers func(sb *secretBuilder) *corev1.Secret
+		expectedErr     *string
+	}{
+		{
+			name:            "owner references - none exist",
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret { return sb.Done() },
+			expectedErr: ptr.To(
+				"secrets \"{NAME}\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding " +
+					"'secrets-store-sync-controller-create-update-policy-binding' denied request: expression 'variables.allowedSecretTypes == true && " +
+					"variables.hasOneSecretSyncOwner == true' resulted in error: composited variable \"hasOneSecretSyncOwner\" fails to evaluate: no such key: ownerReferences",
+			),
+		},
+		{
+			name: "owner references - wrong kind",
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
+					APIVersion: "rbac.authorization.k8s.io/v1",
+					Kind:       "User",
+					Name:       "ownererefs-wrong-kind",
+					UID:        "someuid",
+				}},
+				).Done()
+			},
+			expectedErr: ptr.To(createUpdateErrMsg),
+		},
+		{
+			name: "owner references - two refs",
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
+					APIVersion: "secret-sync.x-k8s.io/v1",
+					Kind:       "SecretSync",
+					Name:       "two-owner-refs",
+					UID:        "someuid",
+				}, {
+					APIVersion: "secret-sync.x-k8s.io/v1alpha",
+					Kind:       "SecretSync",
+					Name:       "two-owner-refs",
+					UID:        "someuid",
+				}},
+				).Done()
+			},
+			expectedErr: ptr.To(createUpdateErrMsg),
+		},
+		{
+			name: "create a ServiceAccount secret",
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
+					APIVersion: "secret-sync.x-k8s.io/v1",
+					Kind:       "SecretSync",
+					Name:       "sa-type-secret",
+					UID:        "someuid",
+				}}).
+					withType(corev1.SecretTypeServiceAccountToken).
+					withAnnotations(map[string]string{corev1.ServiceAccountNameKey: "default"}).
+					Done()
+			},
+			expectedErr: ptr.To("secrets \"{NAME}\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' " +
+				"with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to " +
+				"CREATE secret with kubernetes.io/service-account-token type in the {NAMESPACE} namespace. The controller is " +
+				"not allowed to create or update secrets with this type."),
+		},
+		{
+			name: "create a secret with a type that is not explicitly allowed",
+			secretModifiers: func(sb *secretBuilder) *corev1.Secret {
+				return sb.withOwnerRefs([]metav1.OwnerReference{{
+					APIVersion: "secret-sync.x-k8s.io/v1",
+					Kind:       "SecretSync",
+					Name:       "type-not-allowed",
+					UID:        "someuid",
+				}}).
+					withType("very.random/custom-type").
+					Done()
+			},
+			expectedErr: ptr.To("secrets \"{NAME}\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with " +
+				"binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret" +
+				" with very.random/custom-type type in the {NAMESPACE} namespace. The controller can only create or update secrets in the allowed types" +
+				" list with a single secretsync owner."),
+		},
+	}
+
+	for _, tc := range tests {
+		f.RunTest(t, "CREATE "+tc.name, func(t *testing.T, testCfg *e2elib.TestConfig) {
+			testSecret := tc.secretModifiers(newSecretBuilder("test-secret"))
+
+			_, gotErr := controllerKubeClients.CoreV1().Secrets(testCfg.Namespace).Create(testCfg.Context, testSecret, metav1.CreateOptions{})
+			if (tc.expectedErr != nil) != (gotErr != nil) {
+				t.Fatalf("expectedErr: %v; got: %v", tc.expectedErr, gotErr)
+			}
+
+			if tc.expectedErr != nil {
+				expectedError := replaceInAuthorizationMessages(*tc.expectedErr, testCfg.Namespace, testSecret.Name, "CREATE")
 				if gotErr.Error() != expectedError {
 					t.Fatalf("expectedErr: %v; got: %v", expectedError, gotErr)
 				}
@@ -140,7 +246,7 @@ func TestDeleteSecrets(t *testing.T, f *e2elib.Framework) {
 					Delete(cfg.Context, "some-name", metav1.DeleteOptions{})
 			},
 			expectedErr: ptr.To("secrets \"some-name\" is forbidden: User \"system:serviceaccount:secrets-store-sync-controller-system:secrets-store-sync-controller\"" +
-				" cannot delete resource \"secrets\" in API group \"\" in the namespace \"{NAMESPACE_NAME_HERE}\""),
+				" cannot delete resource \"secrets\" in API group \"\" in the namespace \"{NAMESPACE}\""),
 		},
 		{
 			name: "delete a secret with explicit RBAC privileges",
@@ -181,7 +287,7 @@ func TestDeleteSecrets(t *testing.T, f *e2elib.Framework) {
 			},
 			expectedErr: ptr.To("secrets \"some-name\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-delete-policy' with binding" +
 				" 'secrets-store-sync-controller-delete-policy-binding' denied request: secrets-store-sync-controller has failed to DELETE secrets in " +
-				"the {NAMESPACE_NAME_HERE} namespace. The controller is not allowed to delete secrets.",
+				"the {NAMESPACE} namespace. The controller is not allowed to delete secrets.",
 			),
 		},
 	} {
@@ -192,7 +298,7 @@ func TestDeleteSecrets(t *testing.T, f *e2elib.Framework) {
 			}
 
 			if tc.expectedErr != nil {
-				expectedError := strings.Replace(*tc.expectedErr, "{NAMESPACE_NAME_HERE}", testCfg.Namespace, 1)
+				expectedError := replaceInAuthorizationMessages(*tc.expectedErr, testCfg.Namespace, "some-name", "DELETE")
 				if gotErr.Error() != expectedError {
 					t.Fatalf("expectedErr: %v; got: %v", expectedError, gotErr)
 				}
@@ -235,16 +341,22 @@ func (b *secretBuilder) withAnnotations(a map[string]string) *secretBuilder {
 	return b
 }
 
-func createValidSecretSync(ctx context.Context, t *testing.T, client secretsyncv1alphaclient.SecretSyncInterface) *secretsyncv1alpha1.SecretSync {
-	t.Helper()
-
-	secretSync := testdata.GetSecretSyncOrDie("valid")
-
-	secretSync, err := client.Create(ctx, secretSync, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("failed to create SecretSync: %v", err)
+func validSecret(name string) *corev1.Secret {
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+			Labels: map[string]string{
+				"secrets-store.sync.x-k8s.io": "",
+			},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "secret-sync.x-k8s.io/v1",
+				Kind:       "SecretSync",
+				Name:       name,
+				UID:        "someuid",
+			}},
+		},
+		Type: corev1.SecretTypeOpaque,
 	}
-	return secretSync
 }
 
 func getControllerClientConfig(t *testing.T, f *e2elib.Framework) *rest.Config {
@@ -275,4 +387,10 @@ func getControllerClientConfig(t *testing.T, f *e2elib.Framework) *rest.Config {
 	controllerClientConfig.BearerToken = saToken
 
 	return controllerClientConfig
+}
+
+func replaceInAuthorizationMessages(msg, namespace, name, action string) string {
+	replacer := strings.NewReplacer("{NAMESPACE}", namespace, "{NAME}", name, "{ACTION}", action)
+
+	return replacer.Replace(msg)
 }
