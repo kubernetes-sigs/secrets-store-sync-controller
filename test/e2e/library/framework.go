@@ -2,7 +2,6 @@ package library
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -79,10 +78,11 @@ func (f *Framework) RunTest(t *testing.T, name string, runner func(t *testing.T,
 
 		ns, err := f.clients.KubeClients().CoreV1().Namespaces().Create(testCtx, &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: strings.ReplaceAll(strings.ToLower(name), " ", "-") + "-",
+				GenerateName: "secret-store-sync-e2e-",
 				Labels: map[string]string{
 					"e2e.test": "secrets-store-sync-controller",
 				},
+				Annotations: map[string]string{"e2e.test/name": name},
 			},
 		}, metav1.CreateOptions{})
 
