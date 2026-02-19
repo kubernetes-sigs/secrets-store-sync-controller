@@ -115,7 +115,7 @@ type SecretSyncSpec struct {
 	// It is not related with the force query parameter in the Apply operation.
 	// https://kubernetes.io/docs/reference/using-api/server-side-apply/#conflicts
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:Pattern=^[A-Za-z0-9]([-A-Za-z0-9]+([-._a-zA-Z0-9]?[A-Za-z0-9])*)?
+	// +kubebuilder:validation:Pattern=^[A-Za-z0-9]([-A-Za-z0-9]+([-._a-zA-Z0-9]?[A-Za-z0-9])*)?$
 	// +optional
 	ForceSynchronization string `json:"forceSynchronization,omitempty"`
 }
