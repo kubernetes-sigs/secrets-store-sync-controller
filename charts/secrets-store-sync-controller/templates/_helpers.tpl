@@ -83,11 +83,13 @@ Generate a comma-separated string from a list.
 Determine the api version for the validating admission policies.
 */}}
 {{- define "secrets-store-sync-controller.admissionApiVersion" -}}
-{{- if semverCompare "~1.27.0" .Values.validatingAdmissionPolicies.kubernetesReleaseVersion -}}
+{{- if semverCompare "~1.27.0-0" .Capabilities.KubeVersion.Version -}}
 apiVersion: admissionregistration.k8s.io/v1alpha1
-{{- else if semverCompare "~1.28.0" .Values.validatingAdmissionPolicies.kubernetesReleaseVersion -}}
+{{- else if semverCompare "~1.28.0-0" .Capabilities.KubeVersion.Version -}}
 apiVersion: admissionregistration.k8s.io/v1beta1
-{{- else if semverCompare "^1.29.x" .Values.validatingAdmissionPolicies.kubernetesReleaseVersion -}}
+{{- else if semverCompare "~1.29.0-0" .Capabilities.KubeVersion.Version -}}
+apiVersion: admissionregistration.k8s.io/v1beta1
+{{- else if semverCompare "^1.30.x-0" .Capabilities.KubeVersion.Version -}}
 apiVersion: admissionregistration.k8s.io/v1
 {{- else -}}
 apiVersion: unsupported-validating-admission-api-version
