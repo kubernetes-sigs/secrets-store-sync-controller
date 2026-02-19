@@ -10,7 +10,7 @@ require (
 	go.opentelemetry.io/otel/exporters/prometheus v0.60.0
 	go.opentelemetry.io/otel/sdk/metric v1.38.0
 	golang.org/x/crypto v0.47.0
-	google.golang.org/grpc v1.72.2
+	google.golang.org/grpc v1.72.3
 	google.golang.org/protobuf v1.36.8
 	k8s.io/api v0.35.1
 	k8s.io/apimachinery v0.35.1
