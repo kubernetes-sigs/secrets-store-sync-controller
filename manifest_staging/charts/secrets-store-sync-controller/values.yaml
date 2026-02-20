@@ -59,6 +59,8 @@ affinity:
 
 metricsPort: 8085
 
+rotationPollInterval: 2m
+
 providerContainer:
 #  - name: provider-e2e-installer
 #    image: aramase/e2e-provider:v0.0.1
