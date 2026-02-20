@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -38,15 +39,9 @@ import (
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
 
 	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
-	"sigs.k8s.io/secrets-store-sync-controller/pkg/k8s"
 	"sigs.k8s.io/secrets-store-sync-controller/pkg/provider"
+	"sigs.k8s.io/secrets-store-sync-controller/pkg/token"
 )
-
-type testCondition struct {
-	Type   string
-	Status corev1.ConditionStatus
-	Reason string
-}
 
 type testSecretSyncReconciler struct {
 	fakeProviderServer   *providerfake.MockCSIProviderServer
@@ -60,7 +55,7 @@ func TestReconcile(t *testing.T) {
 		secretSyncToProcess          *secretsyncv1alpha1.SecretSync
 		secret                       *corev1.Secret
 		expectedErrorString          string
-		expectedCondition            *testCondition
+		expectedConditions           []metav1.Condition
 	}{
 		{
 			name: "creates secret successfully",
@@ -104,10 +99,19 @@ func TestReconcile(t *testing.T) {
 					"foo": []byte("bar"),
 				},
 			},
-			expectedCondition: &testCondition{
-				Type:   "Create",
-				Status: corev1.ConditionTrue,
-				Reason: "CreateSucceeded",
+			expectedConditions: []metav1.Condition{
+				{
+					Type:    "SecretCreated",
+					Status:  metav1.ConditionTrue,
+					Reason:  "CreateSuccessful",
+					Message: "Secret created successfully.",
+				},
+				{
+					Type:    "SecretUpdated",
+					Status:  metav1.ConditionTrue,
+					Reason:  ConditionReasonSecretUpToDate,
+					Message: "Secret contains last observed values.",
+				},
 			},
 		},
 		{
@@ -182,10 +186,18 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			expectedErrorString: "label secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
-			expectedCondition: &testCondition{
-				Type:   "Create",
-				Status: corev1.ConditionFalse,
-				Reason: "InvalidClusterSecretLabelError",
+			expectedConditions: []metav1.Condition{
+				{
+					Type:    "SecretCreated",
+					Status:  metav1.ConditionFalse,
+					Reason:  "InvalidClusterSecretLabelError",
+					Message: "label secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
+				},
+				{
+					Type:   "SecretUpdated",
+					Status: metav1.ConditionUnknown,
+					Reason: "NoUpdatesAttemptedYet",
+				},
 			},
 		},
 		{
@@ -234,10 +246,18 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			expectedErrorString: "annotation secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
-			expectedCondition: &testCondition{
-				Type:   "Create",
-				Status: corev1.ConditionFalse,
-				Reason: "InvalidClusterSecretAnnotationError",
+			expectedConditions: []metav1.Condition{
+				{
+					Type:    "SecretCreated",
+					Status:  metav1.ConditionFalse,
+					Reason:  "InvalidClusterSecretAnnotationError",
+					Message: "annotation secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
+				},
+				{
+					Type:   "SecretUpdated",
+					Status: metav1.ConditionUnknown,
+					Reason: "NoUpdatesAttemptedYet",
+				},
 			},
 		},
 		{
@@ -272,10 +292,18 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			expectedErrorString: `secretproviderclasses.secrets-store.csi.x-k8s.io "test-spc" not found`,
-			expectedCondition: &testCondition{
-				Type:   "Create",
-				Status: corev1.ConditionFalse,
-				Reason: "ControllerSPCError",
+			expectedConditions: []metav1.Condition{
+				{
+					Type:    "SecretCreated",
+					Status:  metav1.ConditionFalse,
+					Reason:  "SecretProviderClassMisconfigured",
+					Message: `failed to get SecretProviderClass "test-spc": secretproviderclasses.secrets-store.csi.x-k8s.io "test-spc" not found`,
+				},
+				{
+					Type:   "SecretUpdated",
+					Status: metav1.ConditionUnknown,
+					Reason: "NoUpdatesAttemptedYet",
+				},
 			},
 		},
 		{
@@ -321,10 +349,18 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			expectedErrorString: `provider not found: provider "invalid-fake-provider"`,
-			expectedCondition: &testCondition{
-				Type:   "Create",
-				Status: corev1.ConditionFalse,
-				Reason: "ControllerSPCError",
+			expectedConditions: []metav1.Condition{
+				{
+					Type:    "SecretCreated",
+					Status:  metav1.ConditionFalse,
+					Reason:  "SecretProviderClassMisconfigured",
+					Message: `fetching secrets from the provider failed: provider not found: provider "invalid-fake-provider"`,
+				},
+				{
+					Type:   "SecretUpdated",
+					Status: metav1.ConditionUnknown,
+					Reason: "NoUpdatesAttemptedYet",
+				},
 			},
 		},
 		{
@@ -370,10 +406,18 @@ func TestReconcile(t *testing.T) {
 				},
 			},
 			expectedErrorString: "target key in secretObject.data is empty",
-			expectedCondition: &testCondition{
-				Type:   "Create",
-				Status: corev1.ConditionFalse,
-				Reason: "UserInputValidationFailed",
+			expectedConditions: []metav1.Condition{
+				{
+					Type:    "SecretCreated",
+					Status:  metav1.ConditionFalse,
+					Reason:  "RemoteSecretStoreFetchFailed",
+					Message: "fetching secrets from the provider failed: target key in secretObject.data is empty",
+				},
+				{
+					Type:   "SecretUpdated",
+					Status: metav1.ConditionUnknown,
+					Reason: "NoUpdatesAttemptedYet",
+				},
 			},
 		},
 	}
@@ -402,9 +446,9 @@ func TestReconcile(t *testing.T) {
 			}
 
 			// validate status condition
-			condition := getSecretSyncStatusCondition(t, testSecretSyncReconciler.secretSyncReconciler, req)
-			if !reflect.DeepEqual(condition, test.expectedCondition) {
-				t.Fatalf("expected condition %v, got %v", test.expectedCondition, condition)
+			ss := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, req)
+			if gotConditions := ss.Status.Conditions; !compareConditionsWithoutTransitionTime(gotConditions, test.expectedConditions) {
+				t.Fatalf("expected conditions %v, got %v", test.expectedConditions, gotConditions)
 			}
 		})
 	}
@@ -473,14 +517,25 @@ func TestConditionsOnHashChange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expectedCondition := &testCondition{
-		Type:   "Update",
-		Status: corev1.ConditionTrue,
-		Reason: "UpdateNoValueChangeSucceeded",
+	expectedConditions := []metav1.Condition{
+		{
+			Type:    "SecretCreated",
+			Status:  metav1.ConditionTrue,
+			Reason:  "CreateSuccessful",
+			Message: "Secret created successfully.",
+		},
+		{
+			Type:    "SecretUpdated",
+			Status:  metav1.ConditionTrue,
+			Reason:  "SecretUpToDate",
+			Message: "Secret contains last observed values.",
+		},
 	}
-	condition := getSecretSyncStatusCondition(t, testSecretSyncReconciler.secretSyncReconciler, req)
-	if !reflect.DeepEqual(condition, expectedCondition) {
-		t.Fatalf("expected condition %v, got %v", expectedCondition, condition)
+	ss := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, req)
+	oldHash := ss.Status.SyncHash
+	oldUpdateTime := ss.Status.LastSuccessfulSyncTime
+	if gotConditions := ss.Status.Conditions; !compareConditionsWithoutTransitionTime(gotConditions, expectedConditions) {
+		t.Fatalf("expected condition %v, got %v", expectedConditions, gotConditions)
 	}
 
 	// simulate update with secret value change
@@ -491,35 +546,39 @@ func TestConditionsOnHashChange(t *testing.T) {
 			Contents: []byte("bar"),
 		},
 	})
+
+	// Sleep so that we can observe LastTransitionTime change in LastSuccessfulSyncTime
+	time.Sleep(1 * time.Second)
 	_, err = testSecretSyncReconciler.secretSyncReconciler.Reconcile(context.Background(), req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	expectedConditionAfterSecretChange := &testCondition{
-		Type:   "Update",
-		Status: corev1.ConditionTrue,
-		Reason: "UpdateValueChangeOrForceUpdateSucceeded",
+	expectedConditionAsfterSecretChange := []metav1.Condition{
+		{
+			Type:    "SecretCreated",
+			Status:  metav1.ConditionTrue,
+			Reason:  "CreateSuccessful",
+			Message: "Secret created successfully.",
+		},
+		{
+			Type:    "SecretUpdated",
+			Status:  metav1.ConditionTrue,
+			Reason:  "SecretUpToDate",
+			Message: "Secret contains last observed values.",
+		},
 	}
-	conditionAfterSecretChange := getSecretSyncStatusCondition(t, testSecretSyncReconciler.secretSyncReconciler, req)
-	if !reflect.DeepEqual(conditionAfterSecretChange, expectedConditionAfterSecretChange) {
-		t.Fatalf("expected condition %v, got %v", expectedConditionAfterSecretChange, conditionAfterSecretChange)
-	}
-}
-
-func getSecretSyncStatusCondition(t *testing.T, ssc *SecretSyncReconciler, req ctrl.Request) *testCondition {
-	t.Helper()
-
-	secretSync := getSecretSyncObject(t, ssc, req)
-	if len(secretSync.Status.Conditions) == 0 {
-		return nil
+	ssChanged := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, req)
+	if gotConditions := ssChanged.Status.Conditions; !compareConditionsWithoutTransitionTime(gotConditions, expectedConditionAsfterSecretChange) {
+		t.Fatalf("expected condition %v, got %v", expectedConditionAsfterSecretChange, gotConditions)
 	}
 
-	latestCondition := secretSync.Status.Conditions[len(secretSync.Status.Conditions)-1]
+	if newHash := ssChanged.Status.SyncHash; newHash == oldHash {
+		t.Error("expected SyncHashes to change on provider secrets change")
+	}
 
-	return &testCondition{
-		Type:   latestCondition.Type,
-		Status: corev1.ConditionStatus(latestCondition.Status),
-		Reason: latestCondition.Reason,
+	newUpdateTime := ssChanged.Status.LastSuccessfulSyncTime
+	if !oldUpdateTime.Before(newUpdateTime) {
+		t.Errorf("expected old update condition LastTransitionTime (%v) to be before new update condition LastTransitionTime (%v)", oldUpdateTime, newUpdateTime)
 	}
 }
 
@@ -591,7 +650,7 @@ func newSecretSyncReconciler(
 		Client:          ctrlClient,
 		Clientset:       kubeClient,
 		Scheme:          scheme,
-		TokenClient:     k8s.NewTokenClient(kubeClient),
+		TokenCache:      token.NewManager(kubeClient),
 		ProviderClients: providerClients,
 	}
 
@@ -599,6 +658,24 @@ func newSecretSyncReconciler(
 		fakeProviderServer:   server,
 		secretSyncReconciler: ssc,
 	}
+}
+
+func compareConditionsWithoutTransitionTime(a, b []metav1.Condition) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for i := range a {
+		condA := a[i].DeepCopy()
+		condB := b[i].DeepCopy()
+
+		condA.LastTransitionTime = condB.LastTransitionTime
+		if !reflect.DeepEqual(condA, condB) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func setupScheme(t *testing.T) *runtime.Scheme {
