@@ -20,5 +20,6 @@ limitations under the License.
 package tools
 
 import (
-	_ "github.com/golangci/golangci-lint/cmd/golangci-lint" //nolint
+	_ "github.com/golangci/golangci-lint/v2/cmd/golangci-lint" //nolint
+	_ "k8s.io/code-generator"                                  //nolint
 )
