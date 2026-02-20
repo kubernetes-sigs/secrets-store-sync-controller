@@ -111,6 +111,107 @@ func TestReconcile(t *testing.T) {
 			},
 		},
 		{
+			name: "creates secret successfully with sync interval",
+			secretProviderClassToProcess: &secretsstorecsiv1.SecretProviderClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spc",
+					Namespace: "default",
+				},
+				Spec: secretsstorecsiv1.SecretProviderClassSpec{
+					Provider: "fake-provider",
+					Parameters: map[string]string{
+						"foo": "v1",
+					},
+				},
+			},
+			secretSyncToProcess: &secretsyncv1alpha1.SecretSync{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "sse2esecret",
+					Namespace: "default",
+				},
+				Spec: secretsyncv1alpha1.SecretSyncSpec{
+					ServiceAccountName:      "default",
+					SecretProviderClassName: "test-spc",
+					SyncInterval:            "5m",
+					SecretObject: secretsyncv1alpha1.SecretObject{
+						Type: "Opaque",
+						Data: []secretsyncv1alpha1.SecretObjectData{
+							{
+								SourcePath: "foo",
+								TargetKey:  "bar",
+							},
+						},
+					},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "sse2esecret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"bar": []byte("v1"),
+				},
+				Type: corev1.SecretTypeOpaque,
+			},
+			expectedCondition: &testCondition{
+				Type:   "Create",
+				Status: corev1.ConditionTrue,
+				Reason: "CreateSucceeded",
+			},
+		},
+		{
+			name: "fails with invalid sync interval",
+			secretProviderClassToProcess: &secretsstorecsiv1.SecretProviderClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-spc",
+					Namespace: "default",
+				},
+				Spec: secretsstorecsiv1.SecretProviderClassSpec{
+					Provider: "fake-provider",
+					Parameters: map[string]string{
+						"foo": "v1",
+					},
+				},
+			},
+			secretSyncToProcess: &secretsyncv1alpha1.SecretSync{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "sse2esecret",
+					Namespace: "default",
+				},
+				Spec: secretsyncv1alpha1.SecretSyncSpec{
+					ServiceAccountName:      "default",
+					SecretProviderClassName: "test-spc",
+					SyncInterval:            "30s",
+					SecretObject: secretsyncv1alpha1.SecretObject{
+						Type: "Opaque",
+						Data: []secretsyncv1alpha1.SecretObjectData{
+							{
+								SourcePath: "foo",
+								TargetKey:  "bar",
+							},
+						},
+					},
+				},
+			},
+			secret: &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "sse2esecret",
+					Namespace: "default",
+				},
+				Data: map[string][]byte{
+					"bar": []byte("v1"),
+				},
+				Type: corev1.SecretTypeOpaque,
+			},
+			expectedErrorString: "sync interval 30s is less than minimum allowed 1m0s",
+			expectedCondition: &testCondition{
+				Type:   "Create",
+				Status: corev1.ConditionFalse,
+				Reason: "UserInputValidationFailed",
+			},
+		},
+		{
 			name: "SecretSync not found",
 			secretProviderClassToProcess: &secretsstorecsiv1.SecretProviderClass{
 				ObjectMeta: metav1.ObjectMeta{
