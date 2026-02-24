@@ -28,6 +28,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	"golang.org/x/crypto/pbkdf2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -82,6 +83,15 @@ const (
 	// Used to maintain the same logic as the Secrets Store CSI driver
 	SyncControllerPodName = "SYNC_CONTROLLER_POD_NAME"
 	SyncControllerPodUID  = "SYNC_CONTROLLER_POD_UID"
+
+	// MinSyncInterval is the minimum allowed sync interval
+	MinSyncInterval = 1 * time.Minute
+
+	// MaxSyncInterval is the maximum allowed sync interval
+	MaxSyncInterval = 24 * time.Hour
+
+	// DefaultSyncInterval is the default sync interval when none is specified
+	DefaultSyncInterval = 0 * time.Second // No automatic sync by default
 )
 
 type AllClientBuilder interface {
@@ -233,9 +243,14 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
-	if len(failedCondition.Type) == 0 && !hashChanged {
-		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateNoValueChangeSucceeded, true)
-		return ctrl.Result{}, nil
+	syncInterval, err := r.validateAndParseSyncInterval(ctx, logger, ss, conditionType)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	result, syncRequired := r.checkSyncRequired(ctx, logger, ss, syncInterval, &failedCondition, hashChanged, conditionType)
+	if !syncRequired {
+		return result, nil
 	}
 
 	if conditionType == ConditionTypeCreate {
@@ -291,6 +306,11 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	logger.V(4).Info("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
+	// Requeue after the sync interval if configured for periodic polling
+	if syncInterval > 0 {
+		logger.V(4).Info("Secret synced successfully, requeuing for next poll", "syncInterval", syncInterval)
+		return ctrl.Result{RequeueAfter: syncInterval}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -474,4 +494,75 @@ func (r *SecretSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&secretsyncv1alpha1.SecretSync{}).
 		WithEventFilter(r.shouldReconcilePredicate()).
 		Complete(r)
+}
+
+// validateAndParseSyncInterval validates and parses the sync interval from SecretSync spec
+func (r *SecretSyncReconciler) validateAndParseSyncInterval(
+	ctx context.Context,
+	logger logr.Logger,
+	ss *secretsyncv1alpha1.SecretSync,
+	conditionType string,
+) (time.Duration, error) {
+	syncInterval := DefaultSyncInterval
+	if ss.Spec.SyncInterval == "" {
+		return syncInterval, nil
+	}
+
+	parsedInterval, err := time.ParseDuration(ss.Spec.SyncInterval)
+	if err != nil {
+		logger.Error(err, "failed to parse sync interval", "syncInterval", ss.Spec.SyncInterval)
+		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
+		return syncInterval, err
+	}
+
+	if parsedInterval < MinSyncInterval {
+		err := fmt.Errorf("sync interval %s is less than minimum allowed %s", ss.Spec.SyncInterval, MinSyncInterval)
+		logger.Error(err, "sync interval validation failed")
+		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
+		return syncInterval, err
+	}
+
+	if parsedInterval > MaxSyncInterval {
+		err := fmt.Errorf("sync interval %s is greater than maximum allowed %s", ss.Spec.SyncInterval, MaxSyncInterval)
+		logger.Error(err, "sync interval validation failed")
+		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUserInputValidationFailed, true)
+		return syncInterval, err
+	}
+
+	return parsedInterval, nil
+}
+
+// checkSyncRequired checks if sync is required based on failed conditions, hash changes, and sync interval.
+// Returns (result, false) if we should return early, (result, true) if we should continue
+func (r *SecretSyncReconciler) checkSyncRequired(
+	ctx context.Context,
+	logger logr.Logger,
+	ss *secretsyncv1alpha1.SecretSync,
+	syncInterval time.Duration,
+	failedCondition *metav1.Condition,
+	hashChanged bool,
+	conditionType string,
+) (ctrl.Result, bool) {
+	if len(failedCondition.Type) == 0 && !hashChanged {
+		// No failed conditions and no hash changes - check if we should do periodic sync
+		// Only check sync interval if there's nothing else triggering a sync
+		if syncInterval > 0 && ss.Status.LastSuccessfulSyncTime != nil {
+			timeSinceLastSync := time.Since(ss.Status.LastSuccessfulSyncTime.Time)
+			if timeSinceLastSync < syncInterval {
+				// Not enough time has passed, skip sync and requeue for remaining duration
+				remainingTime := syncInterval - timeSinceLastSync
+				logger.V(4).Info("Sync interval not elapsed, skipping sync", "timeSinceLastSync", timeSinceLastSync, "remainingTime", remainingTime)
+				return ctrl.Result{RequeueAfter: remainingTime}, false
+			}
+		}
+		r.updateStatusConditions(ctx, ss, ConditionTypeUnknown, conditionType, ConditionReasonUpdateNoValueChangeSucceeded, true)
+		// Requeue after the sync interval if configured for periodic polling
+		if syncInterval > 0 {
+			logger.V(4).Info("No changes detected, requeuing for next poll", "syncInterval", syncInterval)
+			return ctrl.Result{RequeueAfter: syncInterval}, false
+		}
+		return ctrl.Result{}, false
+	}
+
+	return ctrl.Result{}, true
 }

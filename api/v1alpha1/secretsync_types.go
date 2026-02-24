@@ -118,6 +118,14 @@ type SecretSyncSpec struct {
 	// +kubebuilder:validation:Pattern=^[A-Za-z0-9]([-A-Za-z0-9]+([-._a-zA-Z0-9]?[A-Za-z0-9])*)?$
 	// +optional
 	ForceSynchronization string `json:"forceSynchronization,omitempty"`
+	// syncInterval specifies the interval at which the secret should be resynced from the provider.
+	// The format is a duration string (e.g., "5m", "1h", "30s").
+	// If not specified, the secret is only synced when the SecretSync resource is created or updated.
+	// Minimum interval is 1 minute. Maximum interval is 24 hours.
+	// +kubebuilder:validation:Pattern=^([0-9]+(\\.[0-9]+)?(s|m|h))+$
+	// +kubebuilder:validation:Type=string
+	// +optional
+	SyncInterval string `json:"syncInterval,omitempty"`
 }
 
 // SecretSyncStatus defines the observed state of the secret synchronization process.
