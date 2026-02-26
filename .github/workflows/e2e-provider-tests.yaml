@@ -49,6 +49,7 @@ jobs:
         with:
           version: "v0.29.0"
           image: "kindest/node:${{ matrix.KUBERNETES_VERSION }}"
+          name: "kind-kube-${{ matrix.KUBERNETES_VERSION }}"
       - name: Test
         run: |
           # GH action sets this var by default. We need to explicitly unset it so that build commit hash is not appended to image tag.
