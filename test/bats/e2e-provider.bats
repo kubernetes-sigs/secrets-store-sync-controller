@@ -22,10 +22,10 @@ SLEEP_TIME=1
 }
 
 @test "Test rbac roles and role bindings exist" {
-  run kubectl get clusterrole/secrets-store-sync-controller-manager-role
+  run kubectl get clusterrole/secrets-store-sync-controller-role
   assert_success
 
-  run kubectl get clusterrolebinding/secrets-store-sync-controller-manager-rolebinding
+  run kubectl get clusterrolebinding/secrets-store-sync-controller-rolebinding
   assert_success 
 }
 
@@ -74,8 +74,9 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml" \
     "sse2esecret" \
-    "Secret update failed because the controller could not retrieve the Secret Provider Class or the SPC is misconfigured. Check the logs or the events for more information." \
-    "ControllerSPCError" \
+    "SecretCreated" \
+    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": secretproviderclasses.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
+    "SecretProviderClassMisconfigured" \
     "False" \
     "spc-namespace" \
     "ss-namespace"
@@ -88,8 +89,9 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/api_credential_secretsync.yaml" \
     "my-custom-api-secret" \
-    "Secret update failed due to validating admission policy check failure, check the logs or the events for more information." \
-    "ValidatingAdmissionPolicyCheckFailed" \
+    "SecretCreated" \
+    "failed to patch secret \\\"my-custom-api-secret\\\": secrets \\\"my-custom-api-secret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with example.com/api-credentials type in the default namespace. The controller can only create or update secrets in the allowed types list with a single secretsync owner." \
+    "ControllerPatchError" \
     "False"
 
   kubectl delete -f "$BATS_RESOURCE_YAML_DIR/api_credential_secretsync.yaml"
@@ -100,43 +102,45 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml" \
     "sse2eserviceaccountsecret" \
-    "Secret update failed due to validating admission policy check failure, check the logs or the events for more information." \
-    "ValidatingAdmissionPolicyCheckFailed" \
+    "SecretCreated" \
+    "failed to patch secret \\\"sse2eserviceaccountsecret\\\": secrets \\\"sse2eserviceaccountsecret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with kubernetes.io/service-account-token type in the default namespace. The controller is not allowed to create or update secrets with this type." \
+    "ControllerPatchError" \
     "False"
 
   kubectl delete -f $BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml
 }
 
 @test "Cannot create a secret with invalid annotations" {
-  expected_message="The secretsyncs \"sse2einvalidannotationssecret\" is invalid: : ValidatingAdmissionPolicy 'secrets-store-sync-controller-validate-annotation-policy' with binding 'secrets-store-sync-controller-validate-annotation-policy-binding' denied request: One of the annotations applied on the secret has an invalid format. Update the annotation and try again."
+  expected_message="failed to patch secret \\\"sse2einvalidannotationssecret\\\": Secret \\\"sse2einvalidannotationssecret\\\" is invalid: metadata.annotations: Invalid value: \\\"my.annotation/with_invalid_characters!\\\": name part must consist of alphanumeric characters, '-', '_' or '.', and must start and end with an alphanumeric character (e.g. 'MyName',  or 'my.name',  or '123-abc', regex used for validation is '([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]')"
 
-  deploy_spc_ss_expect_failure \
+  deploy_spc_ss_verify_conditions \
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/invalid_annotation_key_secretsync.yaml" \
     "sse2einvalidannotationssecret" \
-    "$expected_message"
-
-  deploy_spc_ss_expect_failure \
-    "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
-    "$BATS_RESOURCE_YAML_DIR/invalid_annotation_value_secretsync.yaml" \
-    "sse2einvalidannotationssecret" \
-    "$expected_message"
+    "SecretCreated" \
+    "$expected_message" \
+    "ControllerPatchError" \
+    "False"
 }
 
 @test "Cannot create a secret with invalid labels" {
-  expected_message="The secretsyncs \"sse2einvalidlabelsecret\" is invalid: : ValidatingAdmissionPolicy 'secrets-store-sync-controller-validate-label-policy' with binding 'secrets-store-sync-controller-validate-label-policy-binding' denied request: One of the labels applied on the secret has an invalid format. Update the label and try again."
+  expected_message="failed to patch secret \\\"sse2einvalidlabelsecret\\\": Secret \\\"sse2einvalidlabelsecret\\\" is invalid: metadata.labels: Invalid value: \\\"invalid/key_with_invalid_characters!\\\": name part must consist of alphanumeric characters, '-', '_' or '.', and must start and end with an alphanumeric character (e.g. 'MyName',  or 'my.name',  or '123-abc', regex used for validation is '([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9]')"
 
-  deploy_spc_ss_expect_failure \
+  deploy_spc_ss_verify_conditions \
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/invalid_label_key_secretsync.yaml" \
     "sse2einvalidlabelsecret" \
-    "$expected_message"
+    "SecretCreated" \
+    "$expected_message" \
+    "ControllerPatchError" \
+    "False"
+}
 
-  deploy_spc_ss_expect_failure \
+@test "API validations" {
+  create_secretsync_expect_fail \
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/invalid_label_value_secretsync.yaml" \
-    "sse2einvalidlabelsecret" \
-    "$expected_message"
+    "The SecretSync \"sse2einvalidlabelsecret\" is invalid: spec.secretObject.labels: Invalid value: \"object\": Label keys must not exceed 317 characters (254 for prefix+separator, 63 for name), label values must not exceed 63 characters."
 }
 
 teardown_file() {
