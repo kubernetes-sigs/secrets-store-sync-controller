@@ -25,7 +25,7 @@ validatingAdmissionPolicies:
 image:
   repository: registry.k8s.io/secrets-store-sync/controller # e.g. my-registry.example.com/my-repo
   pullPolicy: IfNotPresent
-  tag: v0.0.2
+  tag: v0.0.3
 
 securityContext:
   # Default values, can be overridden or extended
