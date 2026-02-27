@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Build the manager binary with golang:1.25.5 linux/amd64 image
+# Build the manager binary with golang:1.26.0 linux/amd64 image
+# SHA digest retrieved via: docker pull --platform linux/amd64 golang:1.26.0 && docker inspect golang:1.26.0 --format='{{index .RepoDigests 0}}'
 FROM golang:1.26.0@sha256:c83e68f3ebb6943a2904fa66348867d108119890a2c6a2e6f07b38d0eb6c25c5 AS builder
 
 ARG TARGETOS
