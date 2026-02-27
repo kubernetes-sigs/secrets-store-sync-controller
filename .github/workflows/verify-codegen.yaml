@@ -26,6 +26,7 @@ jobs:
       - name: Verify git output
         shell: bash
         run: |
+          cp ./config/crd/bases/secret-sync.x-k8s.io_secretsyncs.yaml ./manifest_staging/charts/secrets-store-sync-controller/crds/secret-sync.x-k8s.io_secretsyncs.yaml
           if [ -n "$(git status -s)" ]; then
             echo 'Detected code generation changes'
             echo 'Make sure to run `make generate` and `make manifests` and commit those changes'

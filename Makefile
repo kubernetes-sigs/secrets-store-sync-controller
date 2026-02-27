@@ -31,8 +31,8 @@ LDFLAGS ?= "-X $(BUILD_TIME_VAR)=$(BUILD_TIMESTAMP) -X $(BUILD_VERSION_VAR)=$(VE
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v4.5.7
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
+K8S_CODEGEN_VERSION ?= v0.34.3
 KIND_NODE_IMAGE_VERSION ?= v1.32.2
-BATS_VERSION ?= 1.11.0
 SHELLCHECK_VER ?= v0.10.0
 KIND_VERSION ?= v0.27.0
 TRIVY_VERSION ?=  0.52.2
@@ -45,7 +45,6 @@ GOLANGCI_LINT := $(TOOLS_BIN_DIR)/golangci-lint
 HELM := helm
 KIND := kind
 ENVSUBST := envsubst
-BATS := bats
 TRIVY := trivy
 
 # Image URL to use all building/pushing image targets
@@ -86,11 +85,11 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./api/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
-generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+generate: k8s-codegen ## Generate deep copies and clients. Must be run from `realpath .`, not a symlinked dir.
+	./hack/update-codegen.sh
 
 ##@ Build
 
@@ -132,27 +131,15 @@ $(CONTROLLER_GEN): $(LOCALBIN)
 	test -s $(LOCALBIN)/controller-gen && $(LOCALBIN)/controller-gen --version | grep -q $(CONTROLLER_TOOLS_VERSION) || \
 	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_TOOLS_VERSION)
 
+.PHONY: k8s-codegen
+k8s-codegen:
+	cd $(TOOLS_MOD_DIR) && \
+		go mod download "k8s.io/code-generator@$(K8S_CODEGEN_VERSION)"
+
 .PHONY: envtest
 envtest: $(ENVTEST) ## Download envtest-setup locally if necessary.
 $(ENVTEST): $(LOCALBIN)
 	test -s $(LOCALBIN)/setup-envtest || GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-
-.PHONY: operator-sdk
-OPERATOR_SDK ?= $(LOCALBIN)/operator-sdk
-operator-sdk: ## Download operator-sdk locally if necessary.
-ifeq (,$(wildcard $(OPERATOR_SDK)))
-ifeq (, $(shell which operator-sdk 2>/dev/null))
-	@{ \
-	set -e ;\
-	mkdir -p $(dir $(OPERATOR_SDK)) ;\
-	OS=$(shell go env GOOS) && ARCH=$(shell go env GOARCH) && \
-	curl -sSLo $(OPERATOR_SDK) https://github.com/operator-framework/operator-sdk/releases/download/$(OPERATOR_SDK_VERSION)/operator-sdk_$${OS}_$${ARCH} ;\
-	chmod +x $(OPERATOR_SDK) ;\
-	}
-else
-OPERATOR_SDK = $(shell which operator-sdk)
-endif
-endif
 
 ## --------------------------------------
 ## Local Setup
@@ -194,9 +181,6 @@ helm-manifest-install:
 $(HELM): ## Install helm3 if not present
 	helm version --short | grep -q v3 || (curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash)
 
-$(BATS): ## Install bats for running the tests
-	bats --version | grep -q $(BATS_VERSION) || (curl -sSLO https://github.com/bats-core/bats-core/archive/v${BATS_VERSION}.tar.gz && tar -zxvf v${BATS_VERSION}.tar.gz && bash bats-core-${BATS_VERSION}/install.sh /usr/local)
-
 $(ENVSUBST): ## Install envsubst for running the tests
 	envsubst -V || (apt-get -o Acquire::Retries=30 update && apt-get -o Acquire::Retries=30 install gettext-base -y)
 
@@ -227,6 +211,14 @@ $(TRIVY): ## Install trivy for image vulnerability scan
 go-test:
 	go test -count=1 $(GO_FILES) -v -coverprofile cover.out
 
+# You can run a sing test or a suite by specifying TEST_RUN_ARGS such as:
+#
+# TEST_RUN_ARGS='-run Test/APIValidation' make run-e2e-provider-tests
+#
+.PHONY: run-e2e-provider-tests
+run-e2e-provider-tests:
+	cd ./test/e2e/ && go test -count=1 -timeout 55m -v ./ $(TEST_RUN_ARGS)
+
 .PHONY: image-scan
 image-scan: $(TRIVY)
 	# show all vulnerabilities
@@ -243,7 +235,7 @@ test-style: lint lint-charts shellcheck
 
 $(GOLANGCI_LINT): ## Build golangci-lint from tools folder.
 	cd $(TOOLS_MOD_DIR) && \
-		GOPROXY=$(GOPROXY) go build -o $(TOOLS_BIN_DIR)/golangci-lint github.com/golangci/golangci-lint/cmd/golangci-lint
+		GOPROXY=$(GOPROXY) go build -o $(TOOLS_BIN_DIR)/golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 
 .PHONY: lint
 lint: $(GOLANGCI_LINT)
@@ -263,15 +255,10 @@ shellcheck: $(SHELLCHECK)
 ## --------------------------------------
 
 .PHONY: e2e-setup ## Setup environment for e2e tests
-e2e-setup: $(HELM) $(BATS) $(ENVSUBST) $(KIND)
+e2e-setup: $(HELM) $(ENVSUBST) $(KIND)
 
 .PHONY: e2e-bootstrap
 e2e-bootstrap: e2e-setup docker-build setup-kind-cluster helm-manifest-install ## Bootstrap the e2e environment
-
-# Run the e2e provider tests
-.PHONY: run-e2e-provider-tests
-run-e2e-provider-tests:
-	bats -t -T test/bats/e2e-provider.bats
 
 ## --------------------------------------
 ## Release
