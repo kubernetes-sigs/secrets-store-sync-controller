@@ -37,10 +37,14 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	secretsstorecsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
 	"sigs.k8s.io/secrets-store-csi-driver/provider/v1alpha1"
@@ -469,9 +473,57 @@ func (r *SecretSyncReconciler) shouldReconcilePredicate() predicate.Funcs {
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *SecretSyncReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).
+func (r *SecretSyncReconciler) SetupWithManager(mgr ctrl.Manager, secretsPollingInterval time.Duration) error {
+	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&secretsyncv1alpha1.SecretSync{}).
-		WithEventFilter(r.shouldReconcilePredicate()).
-		Complete(r)
+		WithEventFilter(r.shouldReconcilePredicate())
+
+	if secretsPollingInterval > 0 {
+		periodicChannel, pollingFunc := r.providerPollingFunc(secretsPollingInterval, mgr.GetCache())
+
+		if err := mgr.Add(pollingFunc); err != nil {
+			return err
+		}
+		// events from WatchesRawSource don't go through predicates so this will always cause syncs to trigger
+		controllerBuilder.WatchesRawSource(
+			source.TypedChannel(
+				periodicChannel,
+				&handler.TypedEnqueueRequestForObject[*secretsyncv1alpha1.SecretSync]{},
+			),
+		)
+	}
+
+	return controllerBuilder.Complete(r)
+}
+
+func (r *SecretSyncReconciler) providerPollingFunc(pollInterval time.Duration, informersCache cache.Cache) (chan event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync], manager.RunnableFunc) {
+	periodicChannel := make(chan event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync], 1024)
+
+	return periodicChannel, func(ctx context.Context) error {
+		if ok := informersCache.WaitForCacheSync(ctx); !ok {
+			return fmt.Errorf("timed out waiting for cache sync")
+		}
+
+		ticker := time.NewTicker(pollInterval)
+		defer ticker.Stop()
+
+		logger := log.FromContext(ctx)
+		for {
+			select {
+			case <-ticker.C:
+				ssList := &secretsyncv1alpha1.SecretSyncList{}
+				if err := r.List(ctx, ssList); err != nil {
+					logger.Error(err, "failed to list SecretSyncs")
+					continue
+				}
+				for idx := range ssList.Items {
+					periodicChannel <- event.TypedGenericEvent[*secretsyncv1alpha1.SecretSync]{Object: ssList.Items[idx].DeepCopy()}
+				}
+
+			case <-ctx.Done():
+				logger.Info("shutting down periodic resync")
+				return nil
+			}
+		}
+	}
 }
