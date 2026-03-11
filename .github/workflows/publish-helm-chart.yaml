@@ -11,7 +11,7 @@ on:
 # List of all permissions: https://docs.github.com/en/actions/reference/authentication-in-a-workflow#permissions-for-the-github_token
 # We need write permission for contents to be able to publish the chart
 permissions:
-  contents: write
+  contents: write # pushes content to gh-pages branch
 
 jobs:
   publish-chart:
