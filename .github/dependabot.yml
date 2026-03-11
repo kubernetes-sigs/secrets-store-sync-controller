@@ -3,49 +3,13 @@ updates:
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "weekly"
+      interval: "monthly"
     commit-message:
       prefix: "chore"
-    labels:
-      - "area/dependency"
-      - "ok-to-test"
-
-  - package-ecosystem: docker
-    directory: /docker
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "chore"
-    labels:
-      - "area/dependency"
-      - "ok-to-test"
-
-  - package-ecosystem: "gomod"
-    directory: "/hack/tools"
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "chore"
-    labels:
-      - "area/dependency"
-      - "ok-to-test"
-
-  - package-ecosystem: "gomod"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    commit-message:
-      prefix: "chore"
-    ignore:
-      - dependency-name: "*"
-        update-types:
-        - "version-update:semver-major"
-        - "version-update:semver-minor"
     groups:
-      k8s:
+      all:
         patterns:
-        - "k8s.io/*"
-        - "sigs.k8s.io/*"
+          - "*"
     labels:
       - "area/dependency"
       - "ok-to-test"
