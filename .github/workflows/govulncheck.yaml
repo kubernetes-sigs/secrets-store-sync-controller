@@ -1,0 +1,38 @@
+name: "govulncheck"
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+    branches:
+    - main
+  schedule:
+    - cron: "0 7 * * 1" # Mondays at 7:00 AM
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: Dependency vulnerability check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden Runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.0.0
+        with:
+          persist-credentials: false
+
+      - name: Golang vulncheck
+        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+
+      - name: Golang vulncheck - tools
+        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+        with:
+          work-dir: hack/tools
