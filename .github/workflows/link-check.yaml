@@ -26,6 +26,8 @@ jobs:
       with:
         egress-policy: audit
     - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.0.0
+      with:
+        persist-credentials: false
     - name: linkspector
       uses: umbrelladocs/action-linkspector@7fbf24c6adceef216c594da7aa370c575aafcff1 # v1.0.0
 

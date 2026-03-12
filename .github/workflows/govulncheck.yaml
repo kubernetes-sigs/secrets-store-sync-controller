@@ -1,4 +1,4 @@
-name: "CodeQL"
+name: "govulncheck"
 
 on:
   push:
@@ -14,11 +14,9 @@ permissions:
   contents: read
 
 jobs:
-  analyze:
-    name: Analyze
+  govulncheck:
+    name: Dependency vulnerability check
     runs-on: ubuntu-latest
-    permissions:
-      security-events: write
 
     steps:
       - name: Harden Runner
@@ -31,13 +29,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@60168efe1c415ce0f5521ea06d5c2062adbeed1b # v3.28.17
+      - name: Golang vulncheck
+        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
+
+      - name: Golang vulncheck - tools
+        uses: golang/govulncheck-action@b625fbe08f3bccbe446d94fbf87fcc875a4f50ee # v1.0.4
         with:
-          languages: go
-
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@60168efe1c415ce0f5521ea06d5c2062adbeed1b # v3.28.17
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@60168efe1c415ce0f5521ea06d5c2062adbeed1b # v3.28.17
+          work-dir: hack/tools
