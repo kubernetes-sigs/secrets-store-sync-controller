@@ -11,8 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+ARG BASEIMAGE=registry.k8s.io/build-image/debian-base:bookworm-v1.0.7@sha256:368abceecc1308e0913a6fd5ab89a513ee4268becefc2a82dbe616462b29a46b
 
-# Build the manager binary with golang:1.25.5 linux/amd64 image
 FROM golang:1.26.1@sha256:e2ddb153f786ee6210bf8c40f7f35490b3ff7d38be70d1a0d358ba64225f6428 AS builder
 
 ARG TARGETOS
@@ -27,9 +27,7 @@ RUN export GOOS=$TARGETOS && \
     export GOARCH=$TARGETARCH && \
     make build
 
-# Use distroless as minimal base image to package the manager binary
-# Refer to https://github.com/GoogleContainerTools/distroless for more details
-FROM gcr.io/distroless/static:latest
+FROM $BASEIMAGE
 WORKDIR /
 COPY --from=builder /workspace/_output/secrets-store-sync-controller .
 
