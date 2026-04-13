@@ -11,7 +11,7 @@ options:
   # job builds a multi-arch docker image for amd64,arm64
   machineType: 'N1_HIGHCPU_8'
 steps:
-  - name: 'gcr.io/k8s-staging-test-infra/gcb-docker-gcloud:v20240718-5ef92b5c36'
+  - name: 'gcr.io/k8s-staging-test-infra/gcb-docker-gcloud:v20260205-38cfa9523f'
     entrypoint: bash
     dir: ./docker
     env:
