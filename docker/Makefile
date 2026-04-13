@@ -15,7 +15,7 @@
 REGISTRY?=docker.io
 IMAGE_NAME=controller
 # to trigger staging image build we should update the IMAGE_VERSION while cutting a release.
-IMAGE_VERSION ?= $(shell cat ../VERSION)
+IMAGE_VERSION ?= $(shell cat ../VERSION | head -1)
 BUILD_TIMESTAMP := $(shell date +%Y-%m-%d-%H:%M)
 BUILD_COMMIT := $(shell git rev-parse --short HEAD)
 IMAGE_TAG=$(REGISTRY)/$(IMAGE_NAME):$(IMAGE_VERSION)
