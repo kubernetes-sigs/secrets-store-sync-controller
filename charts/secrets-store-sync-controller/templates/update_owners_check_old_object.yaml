@@ -5,9 +5,6 @@ metadata:
   name: "secrets-store-sync-controller-update-check-oldobject-policy"
 spec:
   failurePolicy: Fail
-  paramKind:
-    apiVersion: v1
-    kind: ConfigMap 
   matchConditions:
     - name: 'user-is-secrets-store-sync-controller'
       expression: {{ include "chartname.matchConditionExpression" . | quote }}
@@ -25,6 +22,6 @@ spec:
   validations:
   - expression: "variables.allowedSecretTypes == true && variables.hasOneSecretSyncOwner == true"
     message: "Only secrets with one secret sync owner and with types defined in the allowedSecretTypes list can be updated by the controller"
-    messageExpression: "string(params.data.controllerName)  + ' has failed to ' +  string(request.operation) + ' old secret with ' + string(object.type) + ' type ' + 'in the ' + string(request.namespace) + ' namespace. The controller can only update secrets in the allowed types list with a single secrets-store-sync-controller owner.'"
+    messageExpression: "'secrets-store-sync-controller has failed to ' +  string(request.operation) + ' old secret with ' + string(object.type) + ' type ' + 'in the ' + string(request.namespace) + ' namespace. The controller can only update secrets in the allowed types list with a single secrets-store-sync-controller owner.'"
     reason: "Forbidden"
 {{- end -}}
