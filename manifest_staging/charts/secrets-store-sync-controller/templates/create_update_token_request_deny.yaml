@@ -1,5 +1,5 @@
 {{- if .Values.validatingAdmissionPolicies.applyPolicies -}}
-{{ include "secrets-store-sync-controller.admissionApiVersion" . }}
+apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
   name: "secrets-store-sync-controller-create-update-token-deny-policy"
