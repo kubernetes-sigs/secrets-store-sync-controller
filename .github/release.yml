@@ -1,0 +1,36 @@
+changelog:
+  exclude:
+    labels:
+      - release-note-none
+  categories:
+    - title: "⚠️ Breaking Changes"
+      labels:
+        - release-note-action-required
+    - title: "Features 🌈"
+      labels:
+        - kind/feature
+    - title: "Bug Fixes 🐞"
+      labels:
+        - kind/bug
+        - kind/regression
+    - title: "API Changes"
+      labels:
+        - kind/api-change
+    - title: "Documentation 📘"
+      labels:
+        - kind/documentation
+        - documentation
+    - title: "Deprecation"
+      labels:
+        - kind/deprecation
+    - title: "Testing 💚"
+      labels:
+        - kind/failing-test
+        - kind/flake
+    - title: "Cleanup & Maintenance 🔧"
+      labels:
+        - kind/cleanup
+        - area/dependency
+    - title: "Other Changes"
+      labels:
+        - "*"
