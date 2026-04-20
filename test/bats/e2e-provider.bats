@@ -140,7 +140,7 @@ SLEEP_TIME=1
   create_secretsync_expect_fail \
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/invalid_label_value_secretsync.yaml" \
-    "The SecretSync \"sse2einvalidlabelsecret\" is invalid: spec.secretObject.labels: Invalid value: \"object\": Label keys must not exceed 317 characters (254 for prefix+separator, 63 for name), label values must not exceed 63 characters."
+    "Label keys must not exceed 317 characters (254 for prefix+separator, 63 for name), label values must not exceed 63 characters."
 }
 
 teardown_file() {

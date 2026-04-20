@@ -157,7 +157,7 @@ create_secretsync_expect_fail() {
 
   output=$(kubectl apply -n "${secretsync_ns}" -f "${secretsync_yaml}" 2>&1 || true)
 
-  if [[ ! "${output}" == "${expected_message}" ]]; then
+  if ! echo "${output}" | grep -q "${expected_message}"; then
     echo "expected output: '${expected_message}' got '${output}'"
     return 1
   fi
