@@ -1,7 +1,7 @@
 # Default values for secrets-store-sync-controller.
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
-controllerName: secrets-store-sync-controller-manager
+controllerName: secrets-store-sync-controller
 
 tokenRequestAudience: 
   - audience:  # e.g. api://TokenAudienceExample
@@ -18,9 +18,6 @@ validatingAdmissionPolicies:
     - "kubernetes.io/dockercfg"
     - "kubernetes.io/ssh-auth"
     - "kubernetes.io/tls"
-
-  deniedSecretTypes:
-    - "kubernetes.io/service-account-token"
 
 image:
   repository: registry.k8s.io/secrets-store-sync/controller # e.g. my-registry.example.com/my-repo
