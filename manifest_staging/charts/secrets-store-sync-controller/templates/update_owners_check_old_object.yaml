@@ -3,6 +3,14 @@
 kind: ValidatingAdmissionPolicy
 metadata:
   name: "secrets-store-sync-controller-update-check-oldobject-policy"
+  annotations:
+    kubernetes.io/description: >
+      This policy validates that when the secrets-store-sync-controller updates a Secret,
+      the previous version of the Secret only had a single owner that matches the policy
+      expectations.
+
+      Unlike the 'secrets-store-sync-controller-create-update-policy' that runs on both
+      CREATE and UPDATE, this policy only makes sense for UPDATEs because of the oldobject check.
 spec:
   failurePolicy: Fail
   matchConditions:
