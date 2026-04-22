@@ -58,12 +58,18 @@ Returns 'false' if tokenRequestAudience list is empty.
 {{- if not $tokenAudiences -}}
 false
 {{- else -}}
-{{- $audienceExpressions := list -}}
-{{- range $index, $audience := $tokenAudiences }}
-  {{- $expressionPart := printf "object.spec.audiences.exists(w, w == '%s')" $audience.audience -}}
-  {{- $audienceExpressions = append $audienceExpressions $expressionPart -}}
+  {{- $audienceExpressions := list -}}
+  {{- range $index, $audience := $tokenAudiences }}
+    {{- if $audience.audience -}}
+      {{- $expressionPart := printf "object.spec.audiences.exists(w, w == '%s')" $audience.audience -}}
+      {{- $audienceExpressions = append $audienceExpressions $expressionPart -}}
+    {{- end -}}
+  {{- end -}}
+{{- if $audienceExpressions -}}
+  {{- join " || " $audienceExpressions -}}
+{{- else -}}
+false
 {{- end -}}
-{{- join " || " $audienceExpressions -}}
 {{- end -}}
 {{- end -}}
 
