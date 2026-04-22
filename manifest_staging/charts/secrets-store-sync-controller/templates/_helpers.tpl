@@ -50,39 +50,26 @@ Check if the old secret has the expected label value.
 
 
 {{/*
-Generate token audience comparison expression.
-Returns 'false' if tokenRequestAudience list is empty.
+Generates a JSON list from the input that can be used for set presence check in CEL
 */}}
-{{- define "secrets-store-sync-controller.tokenAudienceComparison" -}}
-{{- $tokenAudiences := .Values.tokenRequestAudience -}}
-{{- if not $tokenAudiences -}}
-false
+{{- define "secrets-store-sync-controller.audiencesToList" -}}
+{{- $tokenRequests := .Values.tokenRequestAudience -}}
+{{- if not $tokenRequests -}}
+[]
 {{- else -}}
-  {{- $audienceExpressions := list -}}
-  {{- range $index, $audience := $tokenAudiences }}
-    {{- if $audience.audience -}}
-      {{- $expressionPart := printf "object.spec.audiences.exists(w, w == '%s')" $audience.audience -}}
-      {{- $audienceExpressions = append $audienceExpressions $expressionPart -}}
+  {{- $audiences := list -}}
+  {{- range $index, $request := $tokenRequests }}
+    {{- if $request.audience -}}
+      {{- $audiences = append $audiences $request.audience -}}
     {{- end -}}
   {{- end -}}
-{{- if $audienceExpressions -}}
-  {{- join " || " $audienceExpressions -}}
-{{- else -}}
-false
-{{- end -}}
+  {{- toJson $audiences -}}
 {{- end -}}
 {{- end -}}
 
-{{/*
-Generate a comma-separated string from a list.
-*/}}
-{{- define "secrets-store-sync-controller.listToString" -}}
-{{- $tokenRequests := .Values.tokenRequestAudience -}}
-{{- $audiences := list -}}
-{{- range $index, $request := $tokenRequests }}
-  {{- $audiences = append $audiences $request.audience -}}
-{{- end -}}
-{{- join ", " $audiences -}}
+
+{{- define "secrets-store-sync-controller.audiencesListOptions" -}}
+{{ include "secrets-store-sync-controller.audiencesToList" . | fromJsonArray | join ", " }}
 {{- end -}}
 
 {{/*
