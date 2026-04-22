@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 
+	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
 	secretsyncclient "sigs.k8s.io/secrets-store-sync-controller/client/clientset/versioned"
 )
 
@@ -93,4 +94,28 @@ func WaitForSecret(ctx context.Context, t *testing.T, secretClient corev1client.
 		}
 		return true, nil
 	})
+}
+
+func WaitForSecretForSecretSync(ctx context.Context, t *testing.T,
+	secretClient corev1client.SecretsGetter,
+	secretSync *secretsyncv1alpha1.SecretSync,
+	expectedSecretData map[string][]byte,
+	timeout time.Duration,
+) error {
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      secretSync.Name,
+			Namespace: secretSync.Namespace,
+			Labels:    map[string]string{"secrets-store.sync.x-k8s.io": ""},
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion: "secret-sync.x-k8s.io/v1alpha1",
+				Kind:       "SecretSync",
+				Name:       secretSync.Name,
+				UID:        secretSync.UID,
+			}},
+		},
+		Data: expectedSecretData,
+	}
+
+	return WaitForSecret(ctx, t, secretClient, secret, timeout)
 }
