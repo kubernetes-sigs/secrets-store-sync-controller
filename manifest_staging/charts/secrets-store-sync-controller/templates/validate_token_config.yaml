@@ -15,15 +15,15 @@ spec:
       operations:  ["CREATE"]
       resources:   ["serviceaccounts/token"]
   variables:
+  - name: audiencesList
+    expression: {{ include "secrets-store-sync-controller.audiencesToList" . | quote }}
   - name: expirationSeconds
     expression: "string(object.spec.expirationSeconds) == '600'"
-  - name: hasCorrectAudience
-    expression: {{ include "secrets-store-sync-controller.tokenAudienceComparison" . | quote }}
   - name: requestHasOnlyOneAudience
     expression: "object.spec.audiences.size() == 1"
   validations:
-  - expression: "variables.hasCorrectAudience == true && variables.expirationSeconds == true && variables.requestHasOnlyOneAudience == true"
-    message: "'Creating a serviceaccount token has failed because the configuration isn't correct.'"
-    messageExpression: "'secrets-store-sync-controller has failed to ' +  string(request.operation) + ' ' + string(request.name) + ' token in the ' + string(request.namespace) + ' namespace. Check the configuration.'"
+  - expression: "variables.expirationSeconds == true && variables.requestHasOnlyOneAudience == true && object.spec.audiences.all(aud, aud in variables.audiencesList)"
+    message: "'Creating a serviceaccount token unauthorized.'"
+    messageExpression: "'Unauthorized ServiceAccount token request in namespace ' + string(request.namespace) + ': the request must set expirationSeconds=600 and pick a single audience from [' + variables.audiencesList.join(', ') + ']'"
     reason: "Forbidden"
 {{- end -}}

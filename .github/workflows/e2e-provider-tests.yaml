@@ -37,10 +37,6 @@ jobs:
           submodules: true
           fetch-depth: 0
           persist-credentials: false
-      - name: Setup BATS
-        uses: mig4/setup-bats@af9a00deb21b5d795cabfeaa8d9060410377686d # v1.2.0
-        with:
-          bats-version: 1.4.1
       - name: Setup helm
         uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5.0.0
       - name: Setup Kubectl
@@ -51,6 +47,9 @@ jobs:
           version: "v0.31.0"
           image: "kindest/node:${{ matrix.KUBERNETES_VERSION }}"
           name: "kind-kube-${{ matrix.KUBERNETES_VERSION }}"
+      - uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        with:
+          go-version: "^1.25"
       - name: Test
         run: |
           # GH action sets this var by default. We need to explicitly unset it so that build commit hash is not appended to image tag.
