@@ -170,6 +170,7 @@ helm-manifest-install:
 		-f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml \
 		--set image.repository=$(REGISTRY)/$(IMAGE_NAME) \
 		--set image.tag=$(VERSION) \
+		--set-json 'tokenRequestAudience=[{"audience":"secrets-store-sync-controller"}]' \
 		manifest_staging/charts/secrets-store-sync-controller
 	rm -f manifest_staging/charts/secrets-store-sync-controller/temp_values.yaml
 
