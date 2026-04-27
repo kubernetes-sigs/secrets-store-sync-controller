@@ -27,144 +27,62 @@ import (
 )
 
 const (
-	ConditionReasonUnknown  = "Unknown"
-	ConditionMessageUnknown = "Unknown"
-	ConditionTypeUnknown    = "Unknown"
-	ConditionTypeCreate     = "Create"
-	ConditionTypeUpdate     = "Update"
+	ConditionTypeCreate = "SecretCreated"
+	ConditionTypeUpdate = "SecretUpdated"
 
-	ConditionReasonCreateSucceeded  = "CreateSucceeded"
-	ConditionMessageCreateSucceeded = "Secret created successfully."
+	ConditionReasonFailedProviderError          = "ProviderError"
+	ConditionReasonFailedInvalidLabelError      = "InvalidClusterSecretLabelError"
+	ConditionReasonFailedInvalidAnnotationError = "InvalidClusterSecretAnnotationError"
+	ConditionReasonControllerSyncError          = "ControllerSyncError"
+	ConditionReasonControllerPatchError         = "ControllerPatchError"
+	ConditionReasonControllerSpcError           = "SecretProviderClassMisconfigured"
+	ConditionReasonRemoteSecretStoreFetchFailed = "RemoteSecretStoreFetchFailed"
 
-	ConditionReasonFailedProviderError  = "ProviderError"
-	ConditionMessageFailedProviderError = "Secret creation failed due to provider error, check the logs or the events for more information."
+	ConditionReasonSyncStarting         = "SyncStarting"
+	ConditionReasonNoUpdateAttemptedYet = "NoUpdatesAttemptedYet"
 
-	ConditionReasonFailedInvalidLabelError  = "InvalidClusterSecretLabelError"
-	ConditionMessageFailedInvalidLabelError = "The secret operation failed because a label reserved for the controller is applied on the secret."
+	ConditionReasonSecretUpToDate   = "SecretUpToDate"
+	ConditionReasonCreateSuccessful = "CreateSuccessful"
 
-	ConditionReasonFailedInvalidAnnotationError  = "InvalidClusterSecretAnnotationError"
-	ConditionMessageFailedInvalidAnnotationError = "The secret create failed because an annotation reserved for the controller is applied on the secret."
-
-	ConditionReasonUpdateNoValueChangeSucceeded  = "UpdateNoValueChangeSucceeded"
-	ConditionMessageUpdateNoValueChangeSucceeded = "The secret was updated successfully at the end of the poll interval and no value change was detected."
-
-	ConditionReasonUpdateValueChangeOrForceUpdateSucceeded  = "UpdateValueChangeOrForceUpdateSucceeded"
-	ConditionMessageUpdateValueChangeOrForceUpdateSucceeded = "The secret was updated successfully: a value change or a force update was detected."
-
-	ConditionReasonSecretPatchFailedUnknownError  = "UnknownError"
-	ConditionMessageSecretPatchFailedUnknownError = "Secret patch failed due to unknown error, check the logs or the events for more information."
-
-	ConditionReasonValidatingAdmissionPolicyCheckFailed  = "ValidatingAdmissionPolicyCheckFailed"
-	ConditionMessageValidatingAdmissionPolicyCheckFailed = "Secret update failed due to validating admission policy check failure, check the logs or the events for more information."
-
-	ConditionReasonControllerInternalError  = "ControllerInternalError"
-	ConditionMessageControllerInternalError = "Secret update failed due to controller internal error, check the logs or the events for more information."
-
-	ConditionReasonControllerSpcError  = "ControllerSPCError"
-	ConditionMessageControllerSpcError = "Secret update failed because the controller could not retrieve the Secret Provider Class or the SPC is misconfigured. Check the logs or the events for more information."
-
-	ConditionReasonUserInputValidationFailed  = "UserInputValidationFailed"
-	ConditionMessageUserInputValidationFailed = "Secret create or update failed due to SecretProviderClass or SecretSync error, check the logs or the events for more information."
+	ConditionMessageCreateSuccessful = "Secret created successfully."
+	ConditionMessageUpdateSuccessful = "Secret contains last observed values."
 )
 
-var FailedConditionsTriggeringRetry = []string{
+var FailedConditionsTriggeringRetry = []string{ // FIXME: should be a set
 	ConditionReasonControllerSpcError,
 	ConditionReasonFailedInvalidAnnotationError,
 	ConditionReasonFailedInvalidLabelError,
 	ConditionReasonFailedProviderError,
 	ConditionReasonFailedInvalidAnnotationError,
 	ConditionReasonFailedProviderError,
-	ConditionReasonSecretPatchFailedUnknownError,
-	ConditionReasonValidatingAdmissionPolicyCheckFailed,
-	ConditionReasonUserInputValidationFailed,
+	ConditionReasonRemoteSecretStoreFetchFailed,
+	ConditionReasonControllerPatchError,
+	ConditionReasonControllerSyncError,
 }
 
-var SucceededConditionsTriggeringRetry = []string{
-	ConditionReasonCreateSucceeded,
-	ConditionReasonUpdateNoValueChangeSucceeded,
-	ConditionReasonUpdateValueChangeOrForceUpdateSucceeded}
+var SuccessfulConditionsTriggeringRetry = []string{
+	ConditionReasonCreateSuccessful,
+	ConditionReasonSecretUpToDate}
 
 var AllowedStringsToDisplayConditionErrorMessage = []string{
 	"validatingadmissionpolicy",
 }
 
-func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, oldConditionType string, newConditionType string, conditionReason string, shouldUpdateStatus bool) {
+func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync, conditionType string, conditionStatus metav1.ConditionStatus, conditionReason, conditionMessage string, shouldUpdateStatus bool) {
 	logger := log.FromContext(ctx)
 
 	if ss.Status.Conditions == nil {
 		ss.Status.Conditions = []metav1.Condition{}
 	}
 
-	if len(oldConditionType) > 0 {
-		logger.V(10).Info("Removing old condition", "oldConditionType", oldConditionType)
-		meta.RemoveStatusCondition(&ss.Status.Conditions, oldConditionType)
+	condition := metav1.Condition{
+		Type:    conditionType,
+		Status:  conditionStatus,
+		Reason:  conditionReason,
+		Message: conditionMessage,
 	}
 
-	var condition metav1.Condition
-	switch conditionReason {
-	case ConditionReasonCreateSucceeded:
-		condition.Status = metav1.ConditionTrue
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonCreateSucceeded
-		condition.Message = ConditionMessageCreateSucceeded
-	case ConditionReasonUpdateNoValueChangeSucceeded:
-		condition.Status = metav1.ConditionTrue
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonUpdateNoValueChangeSucceeded
-		condition.Message = ConditionMessageUpdateNoValueChangeSucceeded
-	case ConditionReasonUpdateValueChangeOrForceUpdateSucceeded:
-		condition.Status = metav1.ConditionTrue
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonUpdateValueChangeOrForceUpdateSucceeded
-		condition.Message = ConditionMessageUpdateValueChangeOrForceUpdateSucceeded
-	case ConditionReasonValidatingAdmissionPolicyCheckFailed:
-		condition.Status = metav1.ConditionFalse
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonValidatingAdmissionPolicyCheckFailed
-		condition.Message = ConditionMessageValidatingAdmissionPolicyCheckFailed
-	case ConditionReasonFailedInvalidAnnotationError:
-		condition.Status = metav1.ConditionFalse
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonFailedInvalidAnnotationError
-		condition.Message = ConditionMessageFailedInvalidAnnotationError
-	case ConditionReasonFailedProviderError:
-		condition.Status = metav1.ConditionFalse
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonFailedProviderError
-		condition.Message = ConditionMessageFailedProviderError
-	case ConditionReasonFailedInvalidLabelError:
-		condition.Status = metav1.ConditionFalse
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonFailedInvalidLabelError
-		condition.Message = ConditionMessageFailedInvalidLabelError
-	case ConditionReasonSecretPatchFailedUnknownError:
-		condition.Status = metav1.ConditionUnknown
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonSecretPatchFailedUnknownError
-		condition.Message = ConditionMessageSecretPatchFailedUnknownError
-	case ConditionReasonUserInputValidationFailed:
-		condition.Status = metav1.ConditionFalse
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonUserInputValidationFailed
-		condition.Message = ConditionMessageUserInputValidationFailed
-	case ConditionReasonControllerSpcError:
-		condition.Status = metav1.ConditionFalse
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonControllerSpcError
-		condition.Message = ConditionMessageControllerSpcError
-	case ConditionReasonControllerInternalError:
-		condition.Status = metav1.ConditionUnknown
-		condition.Type = newConditionType
-		condition.Reason = ConditionReasonControllerInternalError
-		condition.Message = ConditionMessageControllerInternalError
-	default:
-		condition.Status = metav1.ConditionUnknown
-		condition.Type = ConditionTypeUnknown
-		condition.Reason = ConditionReasonUnknown
-		condition.Message = ConditionMessageUnknown
-	}
-
-	logger.V(10).Info("Adding new condition", "newConditionType", newConditionType, "conditionReason", conditionReason)
+	logger.V(10).Info("Adding new condition", "newConditionType", conditionType, "conditionReason", conditionReason)
 	meta.SetStatusCondition(&ss.Status.Conditions, condition)
 
 	if !shouldUpdateStatus {
@@ -176,4 +94,24 @@ func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ss *s
 	}
 
 	logger.V(10).Info("Updated status", "condition", condition)
+}
+
+func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync) error {
+	if ss.Status.Conditions == nil {
+		ss.Status.Conditions = []metav1.Condition{}
+	}
+
+	meta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
+		Type:   ConditionTypeCreate,
+		Status: metav1.ConditionUnknown,
+		Reason: ConditionReasonSyncStarting,
+	})
+
+	meta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
+		Type:   ConditionTypeUpdate,
+		Status: metav1.ConditionUnknown,
+		Reason: ConditionReasonNoUpdateAttemptedYet,
+	})
+
+	return r.Client.Status().Update(ctx, ss)
 }
