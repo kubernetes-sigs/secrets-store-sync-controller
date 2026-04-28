@@ -22,19 +22,6 @@ The helm chart for the controller has validating admission policies that are ava
 
 Before you begin, ensure the [following](https://kubernetes.io/docs/reference/access-authn-authz/validating-admission-policy/#before-you-begin).
 
-If you're creating a kind cluster, here's a sample config:
-
-```bash
-cat <<EOF | kind create cluster --name sync-controller --image kindest/node:v1.29.2 --config=-
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-featureGates:
-  ValidatingAdmissionPolicy: true
-runtimeConfig:
-  admissionregistration.k8s.io/v1beta1: true
-EOF
-```
-
 ### Deploy the controller
 
 As the controller is still under development, the helm chart is not available in the public repository. You can deploy the controller from the source code by following these steps:
