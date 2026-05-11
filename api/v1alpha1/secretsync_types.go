@@ -236,7 +236,3 @@ type SecretSyncList struct {
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []SecretSync `json:"items"`
 }
-
-func init() {
-	SchemeBuilder.Register(&SecretSync{}, &SecretSyncList{})
-}
