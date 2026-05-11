@@ -29,7 +29,7 @@ jobs:
       with:
         persist-credentials: false
     - name: linkspector
-      uses: umbrelladocs/action-linkspector@1a59b2a2845679edd69f18de00d4c2b3d4a00428 # master with pinned deps; TODO: change to a release when available
+      uses: umbrelladocs/action-linkspector@963b6264d7de32c904942a70b488d3407453049e # v1.5.1
 
       with:
         reporter: github-pr-review
