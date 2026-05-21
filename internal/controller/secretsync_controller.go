@@ -268,7 +268,7 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	secretObj := ss.Spec.SecretObject
 	secretType := corev1.SecretType(secretObj.Type)
 	var datamap map[string][]byte
-	if datamap, err = secretutil.GetSecretData(secretObj.Data, secretType, files); err != nil {
+	if datamap, err = secretutil.BuildKubeSecretData(secretObj.Data, secretType, files); err != nil {
 		logger.Error(err, "failed to get secret data", "secretName", ss.Name)
 		return nil, ConditionReasonRemoteSecretStoreFetchFailed, err
 	}
