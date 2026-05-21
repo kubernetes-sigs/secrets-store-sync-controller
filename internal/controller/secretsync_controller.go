@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -372,6 +371,9 @@ func computeCurrentStateHash(secretData map[string][]byte, spc *secretsstorecsiv
 	if err != nil {
 		return "", err
 	}
+	// secretBytesLenPrefixed does a length prefix on the secretBytes given it's a
+	// user-input base for the hashing below
+	secretBytesLenPrefixed := append([]byte(strconv.Itoa(len(secretBytes))+":"), secretBytes...)
 
 	toHash := strings.Join(
 		[]string{
@@ -381,27 +383,19 @@ func computeCurrentStateHash(secretData map[string][]byte, spc *secretsstorecsiv
 			// SecretSync bits
 			string(ss.UID),
 			strconv.FormatInt(ss.ObjectMeta.Generation, 10),
+			// ForceSynchronization is the only user input in this group and must therefore always come last
 			ss.Spec.ForceSynchronization,
 		},
 		"|",
 	)
 
 	salt := []byte(string(ss.UID))
-	dk := pbkdf2.Key(append(secretBytes, []byte(toHash)...), salt, 100_000, 32, sha512.New)
+	// we need to use key derivation here rather than hashing directly in case the
+	// secretBytes had low enthropy -> the rest of the hash input are discoverable
+	// and we could leak the secret otherwise.
+	dk := pbkdf2.Key(append(secretBytesLenPrefixed, []byte(toHash)...), salt, 100_000, 32, sha512.New)
 
-	// Create a new HMAC instance with SHA-56 as the hash type and the pbkdf2 key.
-	hmac := hmac.New(sha512.New, dk)
-
-	_, err = hmac.Write(dk)
-	if err != nil {
-		return "", err
-	}
-
-	// Get the final HMAC hash in hexadecimal format.
-	dataHmac := hmac.Sum(nil)
-	hmacHex := hex.EncodeToString(dataHmac)
-
-	return hmacHex, nil
+	return "v1:" + hex.EncodeToString(dk), nil
 }
 
 // processIfSecretChanged checks if the secret sync object has changed.
