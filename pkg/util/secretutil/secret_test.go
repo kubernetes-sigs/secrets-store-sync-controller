@@ -302,7 +302,7 @@ func TestGetSecretData(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			datamap, err := GetSecretData(test.secretObjData, test.secretType, test.currentFiles)
+			datamap, err := BuildKubeSecretData(test.secretObjData, test.secretType, test.currentFiles)
 			if len(test.expectedErrorString) > 0 {
 				if err == nil || err.Error() != test.expectedErrorString {
 					t.Fatalf("expected err: %+v, got: %+v", test.expectedErrorString, err)

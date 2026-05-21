@@ -152,9 +152,9 @@ func getPrivateKey(data []byte) ([]byte, error) {
 	return pem.EncodeToMemory(block), nil
 }
 
-// GetSecretData gets the object contents from the pods target path and returns a
+// BuildKubeSecretData gets the object contents from the pods target path and returns a
 // map that will be populated in the Kubernetes secret data field
-func GetSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretType corev1.SecretType, files map[string][]byte) (map[string][]byte, error) {
+func BuildKubeSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretType corev1.SecretType, files map[string][]byte) (map[string][]byte, error) {
 	datamap := make(map[string][]byte)
 	for _, data := range secretObjData {
 		sourcePath := strings.TrimSpace(data.SourcePath)
