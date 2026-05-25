@@ -238,7 +238,7 @@ func SecretProviderServiceAccountTokenAttrs(tokenManager *Manager, namespace, se
 	klog.V(5).InfoS("Fetched service account token attrs", "serviceAccountName", serviceAccountName, "namespace", namespace)
 	tokens, err := json.Marshal(outputs)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to marshal token request output: %T", err)
 	}
 
 	return map[string]string{
