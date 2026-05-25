@@ -306,8 +306,8 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 
 	paramsJSON, err := json.Marshal(parameters)
 	if err != nil {
-		logger.Error(err, "failed to marshal parameters")
-		return nil, ConditionReasonControllerSyncError, err
+		logger.Error(fmt.Errorf("%T", err), "failed to marshal parameters")
+		return nil, ConditionReasonControllerSyncError, fmt.Errorf("failed to marshal parameters: %T", err)
 	}
 
 	return paramsJSON, "", nil
@@ -369,7 +369,7 @@ func computeCurrentStateHash(secretData map[string][]byte, spc *secretsstorecsiv
 	// Serialize the secret data, parts of the spc and the ss data.
 	secretBytes, err := json.Marshal(secretData)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to marshal data: %T", err)
 	}
 	// secretBytesLenPrefixed does a length prefix on the secretBytes given it's a
 	// user-input base for the hashing below
