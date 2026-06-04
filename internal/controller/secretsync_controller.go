@@ -375,16 +375,18 @@ func computeCurrentStateHash(secretData map[string][]byte, spc *secretsstorecsiv
 	// user-input base for the hashing below
 	secretBytesLenPrefixed := append([]byte(strconv.Itoa(len(secretBytes))+":"), secretBytes...)
 
+	// changes to any of the below inputs (and the above secret data) mean the state
+	// changed and we should attempt a new sync
 	toHash := strings.Join(
 		[]string{
 			// SecretProviderClass bits
-			string(spc.UID),
-			strconv.FormatInt(spc.ObjectMeta.Generation, 10),
+			string(spc.UID), // SPC UID in case the SPC object got recreated
+			strconv.FormatInt(spc.ObjectMeta.Generation, 10), // SPC generation in case the current SPC object's spec changed (ignore status changes)
 			// SecretSync bits
-			string(ss.UID),
-			strconv.FormatInt(ss.ObjectMeta.Generation, 10),
+			string(ss.UID), // SS UID in case the SS got recreated
+			strconv.FormatInt(ss.ObjectMeta.Generation, 10), // SS generation in case the SS spec changed (ignore status changes)
 			// ForceSynchronization is the only user input in this group and must therefore always come last
-			ss.Spec.ForceSynchronization,
+			ss.Spec.ForceSynchronization, // changes to this field should always cause a new attempt to sync the Secret
 		},
 		"|",
 	)
