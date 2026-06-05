@@ -27,7 +27,7 @@ import (
 	"golang.org/x/crypto/pkcs12"
 	corev1 "k8s.io/api/core/v1"
 
-	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
+	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
 )
 
 const (
@@ -152,19 +152,9 @@ func getPrivateKey(data []byte) ([]byte, error) {
 	return pem.EncodeToMemory(block), nil
 }
 
-// GetSecretType returns a k8s secret type.
-// Kubernetes doesn't impose any constraints on the type name: https://kubernetes.io/docs/concepts/configuration/secret/#secret-types
-// If the secret type is empty, then default is Opaque.
-func GetSecretType(sType string) corev1.SecretType {
-	if sType == "" {
-		return corev1.SecretTypeOpaque
-	}
-	return corev1.SecretType(sType)
-}
-
-// GetSecretData gets the object contents from the pods target path and returns a
+// BuildKubeSecretData gets the object contents from the pods target path and returns a
 // map that will be populated in the Kubernetes secret data field
-func GetSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretType corev1.SecretType, files map[string][]byte) (map[string][]byte, error) {
+func BuildKubeSecretData(secretObjData []secretsyncv1alpha1.SecretObjectData, secretType corev1.SecretType, files map[string][]byte) (map[string][]byte, error) {
 	datamap := make(map[string][]byte)
 	for _, data := range secretObjData {
 		sourcePath := strings.TrimSpace(data.SourcePath)

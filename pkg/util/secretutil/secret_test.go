@@ -24,7 +24,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 
-	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/v1alpha1"
+	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
 )
 
 const (
@@ -302,7 +302,7 @@ func TestGetSecretData(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			datamap, err := GetSecretData(test.secretObjData, test.secretType, test.currentFiles)
+			datamap, err := BuildKubeSecretData(test.secretObjData, test.secretType, test.currentFiles)
 			if len(test.expectedErrorString) > 0 {
 				if err == nil || err.Error() != test.expectedErrorString {
 					t.Fatalf("expected err: %+v, got: %+v", test.expectedErrorString, err)
@@ -557,31 +557,6 @@ g+Ia2YI15BzapW0agqSSTlfGMoQHaPRh1+XYtkOd/xb4xc8d+gc0
 			privateKey, err := getPrivateKey([]byte(test.actual()))
 			assert.Equal(t, test.expectedErr, err != nil)
 			assert.Equal(t, test.expectedKey, string(privateKey))
-		})
-	}
-}
-
-func TestGetSecretType(t *testing.T) {
-	tests := []struct {
-		name   string
-		actual string
-		want   corev1.SecretType
-	}{
-		{
-			name:   "empty secret type",
-			actual: "",
-			want:   corev1.SecretTypeOpaque,
-		},
-		{
-			name:   "secret type is custom",
-			actual: "custom",
-			want:   corev1.SecretType("custom"),
-		},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			assert.Equal(t, test.want, GetSecretType(test.actual))
 		})
 	}
 }

@@ -49,7 +49,7 @@ Deploy the SecretProviderClass. The [SecretProviderClass](https://secrets-store-
 
 ```yaml
 export NAMESPACE=<namespace>
-cat <<EOF | kubectl apply -n ${NAMESPACE} -f -
+kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: secrets-store.csi.x-k8s.io/v1
 kind: SecretProviderClass
 metadata:
@@ -73,7 +73,7 @@ Create a SecretSync object. The SecretSync object specifies the secret provider 
 
 ```yaml
 export SERVICE_ACCOUNT_NAME=<service_account_name>
-cat <<EOF | kubectl apply -n ${NAMESPACE} -f -
+kubectl apply -n ${NAMESPACE} -f - <<EOF
 apiVersion: secret-sync.x-k8s.io/v1alpha1
 kind: SecretSync
 metadata:
@@ -105,16 +105,6 @@ Run the following command to uninstall the controller:
 ```bash
 helm delete secrets-sync-controller
 ```
-
-<!-- Add this section once we have e2e tests 
-## Test the controller with e2e-provider
-If you want to test the controller with the e2e-provider, follow these steps:
-
-From the root of the project, run the following command to run the e2e tests:
-```sh
-bats test/bats/e2e-provider-ssc.bats
-```
--->
 
 ## Troubleshooting
 The validating admission policies are available for k8s 1.27 and later. If you are using an older version of k8s, you may need to disable the validating admission policies by setting the `validatingAdmissionPolicies.applyPolicies` parameter to `false` in the `secret-sync-controller/secretsync/values.yaml` file.
