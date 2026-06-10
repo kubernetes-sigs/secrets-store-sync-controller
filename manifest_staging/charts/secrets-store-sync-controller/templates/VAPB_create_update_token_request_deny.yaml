@@ -1,9 +1,0 @@
-{{- if .Values.validatingAdmissionPolicies.applyPolicies -}}
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  name: "secrets-store-sync-controller-create-update-token-deny-policy-binding"
-spec:
-  policyName: "secrets-store-sync-controller-create-update-token-deny-policy"
-  validationActions: [Deny]
-{{- end -}}
