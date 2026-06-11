@@ -22,10 +22,10 @@ SLEEP_TIME=1
 }
 
 @test "Test rbac roles and role bindings exist" {
-  run kubectl get clusterrole/secrets-store-sync-controller-manager-role
+  run kubectl get clusterrole/secrets-store-sync-controller-role
   assert_success
 
-  run kubectl get clusterrolebinding/secrets-store-sync-controller-manager-rolebinding
+  run kubectl get clusterrolebinding/secrets-store-sync-controller-rolebinding
   assert_success 
 }
 
@@ -75,7 +75,7 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml" \
     "sse2esecret" \
     "SecretCreated" \
-    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": SecretProviderClass.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
+    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": secretproviderclasses.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
     "SecretProviderClassMisconfigured" \
     "False" \
     "spc-namespace" \
