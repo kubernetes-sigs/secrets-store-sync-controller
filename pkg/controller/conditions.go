@@ -27,7 +27,6 @@ import (
 )
 
 const (
-	ConditionTypeCreate = "SecretCreated"
 	ConditionTypeUpdate = "SecretUpdated"
 
 	ConditionReasonFailedProviderError          = "ProviderError"
@@ -41,14 +40,12 @@ const (
 	ConditionReasonSyncStarting         = "SyncStarting"
 	ConditionReasonNoUpdateAttemptedYet = "NoUpdatesAttemptedYet"
 
-	ConditionReasonSecretUpToDate   = "SecretUpToDate"
-	ConditionReasonCreateSuccessful = "CreateSuccessful"
+	ConditionReasonSecretUpToDate = "SecretUpToDate"
 
-	ConditionMessageCreateSuccessful = "Secret created successfully."
 	ConditionMessageUpdateSuccessful = "Secret contains last observed values."
 )
 
-func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ssCopy *secretsyncv1alpha1.SecretSync, conditionType string, conditionStatus metav1.ConditionStatus, conditionReason, conditionMessage string, shouldUpdateStatus bool) error {
+func (r *SecretSyncReconciler) updateStatusCondition(ctx context.Context, ssCopy *secretsyncv1alpha1.SecretSync, conditionStatus metav1.ConditionStatus, conditionReason, conditionMessage string) error {
 	logger := klog.FromContext(ctx)
 
 	if ssCopy.Status.Conditions == nil {
@@ -56,18 +53,14 @@ func (r *SecretSyncReconciler) updateStatusConditions(ctx context.Context, ssCop
 	}
 
 	condition := metav1.Condition{
-		Type:    conditionType,
+		Type:    ConditionTypeUpdate,
 		Status:  conditionStatus,
 		Reason:  conditionReason,
 		Message: conditionMessage,
 	}
 
-	logger.V(10).Info("Adding new condition", "newConditionType", conditionType, "conditionReason", conditionReason)
+	logger.V(10).Info("Adding new condition", "newConditionType", ConditionTypeUpdate, "conditionReason", conditionReason)
 	meta.SetStatusCondition(&ssCopy.Status.Conditions, condition)
-
-	if !shouldUpdateStatus {
-		return nil
-	}
 
 	if _, err := r.ssClient.SecretSyncs(ssCopy.Namespace).UpdateStatus(ctx, ssCopy, metav1.UpdateOptions{}); err != nil {
 		logger.Error(err, "Failed to update status", "condition", condition)
@@ -81,12 +74,6 @@ func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyn
 	if ss.Status.Conditions == nil {
 		ss.Status.Conditions = []metav1.Condition{}
 	}
-
-	meta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
-		Type:   ConditionTypeCreate,
-		Status: metav1.ConditionUnknown,
-		Reason: ConditionReasonSyncStarting,
-	})
 
 	meta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
 		Type:   ConditionTypeUpdate,

@@ -264,14 +264,7 @@ func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName
 		return err
 	}
 
-	// if the secret sync hash is empty, it means the secret does not exist, so the condition type is create
-	// otherwise, the condition type is update
-	conditionType := ConditionTypeUpdate
-	if len(ss.Status.SyncHash) == 0 {
-		conditionType = ConditionTypeCreate
-	}
-
-	if len(ss.Status.Conditions) < 2 {
+	if len(ss.Status.Conditions) == 0 {
 		ss = ss.DeepCopy()
 		ss, err = r.initConditions(ctx, ss)
 		if err != nil {
@@ -285,7 +278,7 @@ func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName
 
 	reason, err := r.validateLabelsAnnotations(secretObj)
 	if err != nil {
-		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, err.Error(), true); statusUpdateErr != nil {
+		if statusUpdateErr := r.updateStatusCondition(ctx, ss, metav1.ConditionFalse, reason, err.Error()); statusUpdateErr != nil {
 			logger.Error(statusUpdateErr, "failed to update SecretSync status")
 		}
 		return err
@@ -293,7 +286,7 @@ func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName
 
 	spc, err := r.secretProviderClassLister.SecretProviderClasses(objRef.Namespace).Get(ss.Spec.SecretProviderClassName)
 	if err != nil { // FIXME: handle not found? -> would have to be able to react to SPC changes
-		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err), true); statusUpdateErr != nil {
+		if statusUpdateErr := r.updateStatusCondition(ctx, ss, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err)); statusUpdateErr != nil {
 			logger.Error(statusUpdateErr, "failed to update SecretSync status")
 		}
 		return err
@@ -301,7 +294,7 @@ func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName
 
 	datamap, reason, err := r.fetchSecretsFromProvider(ctx, logger, spc, ss)
 	if err != nil {
-		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, fmt.Sprintf("fetching secrets from the provider failed: %v", err), true); statusUpdateErr != nil {
+		if statusUpdateErr := r.updateStatusCondition(ctx, ss, metav1.ConditionFalse, reason, fmt.Sprintf("fetching secrets from the provider failed: %v", err)); statusUpdateErr != nil {
 			logger.Error(statusUpdateErr, "failed to update SecretSync status")
 		}
 		return err
@@ -311,7 +304,7 @@ func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName
 	syncHash, err := computeCurrentStateHash(datamap, spc, ss)
 	if err != nil {
 		logger.Error(err, "failed to compute state hash") // TODO: could this leak secrets?
-		if statusUpdateErr := r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSyncError, "failed to compute state hash", true); statusUpdateErr != nil {
+		if statusUpdateErr := r.updateStatusCondition(ctx, ss, metav1.ConditionFalse, ConditionReasonControllerSyncError, "failed to compute state hash"); statusUpdateErr != nil {
 			logger.Error(statusUpdateErr, "failed to update SecretSync status")
 		}
 		return err
@@ -324,28 +317,19 @@ func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName
 	}
 
 	ssCopy := ss.DeepCopy()
-
 	// Attempt to create or update the secret.
 	if err = r.serverSidePatchSecret(ctx, ssCopy, datamap); err != nil {
 		logger.Error(err, "failed to patch secret", "secretName", secretName)
-		if statusUpdateErr := r.updateStatusConditions(ctx, ssCopy, conditionType, metav1.ConditionFalse, ConditionReasonControllerPatchError, fmt.Sprintf("failed to patch secret %q: %v", ssCopy.Name, err), true); statusUpdateErr != nil {
+		if statusUpdateErr := r.updateStatusCondition(ctx, ssCopy, metav1.ConditionFalse, ConditionReasonControllerPatchError, fmt.Sprintf("failed to patch secret %q: %v", ssCopy.Name, err)); statusUpdateErr != nil {
 			logger.Error(statusUpdateErr, "failed to update SecretSync status")
 		}
 		return err
 	}
 
-	if conditionType == ConditionTypeCreate {
-		_ = r.updateStatusConditions(ctx, ssCopy, conditionType, metav1.ConditionTrue, ConditionReasonCreateSuccessful, ConditionMessageCreateSuccessful, false)
-	}
-	_ = r.updateStatusConditions(ctx, ssCopy, ConditionTypeUpdate, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful, false)
-
 	// Update status fields.
 	ssCopy.Status.LastSuccessfulSyncTime = &metav1.Time{Time: time.Now()}
 	ssCopy.Status.SyncHash = syncHash
-
-	// Update the status.
-	_, err = r.ssClient.SecretSyncs(objRef.Namespace).UpdateStatus(ctx, ssCopy, metav1.UpdateOptions{})
-	if err != nil {
+	if err := r.updateStatusCondition(ctx, ssCopy, metav1.ConditionTrue, ConditionReasonSecretUpToDate, ConditionMessageUpdateSuccessful); err != nil {
 		return err
 	}
 

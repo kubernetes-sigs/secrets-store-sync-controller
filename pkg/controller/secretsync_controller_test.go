@@ -123,12 +123,6 @@ func TestReconcile(t *testing.T) {
 			},
 			expectedConditions: []metav1.Condition{
 				{
-					Type:    "SecretCreated",
-					Status:  metav1.ConditionTrue,
-					Reason:  "CreateSuccessful",
-					Message: "Secret created successfully.",
-				},
-				{
 					Type:    "SecretUpdated",
 					Status:  metav1.ConditionTrue,
 					Reason:  ConditionReasonSecretUpToDate,
@@ -215,15 +209,10 @@ func TestReconcile(t *testing.T) {
 			expectedErrorString: "label secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
 			expectedConditions: []metav1.Condition{
 				{
-					Type:    "SecretCreated",
+					Type:    "SecretUpdated",
 					Status:  metav1.ConditionFalse,
 					Reason:  "InvalidClusterSecretLabelError",
 					Message: "label secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
-				},
-				{
-					Type:   "SecretUpdated",
-					Status: metav1.ConditionUnknown,
-					Reason: "NoUpdatesAttemptedYet",
 				},
 			},
 			expectedActions: []recordedAction{
@@ -279,15 +268,10 @@ func TestReconcile(t *testing.T) {
 			expectedErrorString: "annotation secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
 			expectedConditions: []metav1.Condition{
 				{
-					Type:    "SecretCreated",
+					Type:    "SecretUpdated",
 					Status:  metav1.ConditionFalse,
 					Reason:  "InvalidClusterSecretAnnotationError",
 					Message: "annotation secrets-store.sync.x-k8s.io is reserved for use by the Secrets Store Sync Controller",
-				},
-				{
-					Type:   "SecretUpdated",
-					Status: metav1.ConditionUnknown,
-					Reason: "NoUpdatesAttemptedYet",
 				},
 			},
 			expectedActions: []recordedAction{
@@ -329,15 +313,10 @@ func TestReconcile(t *testing.T) {
 			expectedErrorString: `secretproviderclass.secrets-store.csi.x-k8s.io "test-spc" not found`,
 			expectedConditions: []metav1.Condition{
 				{
-					Type:    "SecretCreated",
+					Type:    "SecretUpdated",
 					Status:  metav1.ConditionFalse,
 					Reason:  "SecretProviderClassMisconfigured",
 					Message: `failed to get SecretProviderClass "test-spc": secretproviderclass.secrets-store.csi.x-k8s.io "test-spc" not found`,
-				},
-				{
-					Type:   "SecretUpdated",
-					Status: metav1.ConditionUnknown,
-					Reason: "NoUpdatesAttemptedYet",
 				},
 			},
 			expectedActions: []recordedAction{
@@ -390,15 +369,10 @@ func TestReconcile(t *testing.T) {
 			expectedErrorString: `provider not found: provider "invalid-fake-provider"`,
 			expectedConditions: []metav1.Condition{
 				{
-					Type:    "SecretCreated",
+					Type:    "SecretUpdated",
 					Status:  metav1.ConditionFalse,
 					Reason:  "SecretProviderClassMisconfigured",
 					Message: `fetching secrets from the provider failed: provider not found: provider "invalid-fake-provider"`,
-				},
-				{
-					Type:   "SecretUpdated",
-					Status: metav1.ConditionUnknown,
-					Reason: "NoUpdatesAttemptedYet",
 				},
 			},
 			expectedActions: []recordedAction{
@@ -451,15 +425,10 @@ func TestReconcile(t *testing.T) {
 			expectedErrorString: "target key in secretObject.data is empty",
 			expectedConditions: []metav1.Condition{
 				{
-					Type:    "SecretCreated",
+					Type:    "SecretUpdated",
 					Status:  metav1.ConditionFalse,
 					Reason:  "RemoteSecretStoreFetchFailed",
 					Message: "fetching secrets from the provider failed: target key in secretObject.data is empty",
-				},
-				{
-					Type:   "SecretUpdated",
-					Status: metav1.ConditionUnknown,
-					Reason: "NoUpdatesAttemptedYet",
 				},
 			},
 			expectedActions: []recordedAction{
@@ -544,12 +513,6 @@ func TestConditionsOnHashChange(t *testing.T) {
 			LastSuccessfulSyncTime: &metav1.Time{Time: time.Now()},
 			Conditions: []metav1.Condition{
 				{
-					Type:    ConditionTypeCreate,
-					Status:  metav1.ConditionTrue,
-					Reason:  ConditionReasonCreateSuccessful,
-					Message: ConditionMessageCreateSuccessful,
-				},
-				{
 					Type:    ConditionTypeUpdate,
 					Status:  metav1.ConditionFalse,
 					Reason:  ConditionReasonControllerPatchError,
@@ -602,12 +565,6 @@ func TestConditionsOnHashChange(t *testing.T) {
 	}
 	expectedConditions := []metav1.Condition{
 		{
-			Type:    "SecretCreated",
-			Status:  "True",
-			Reason:  "CreateSuccessful",
-			Message: "Secret created successfully.",
-		},
-		{
 			Type:    "SecretUpdated",
 			Status:  "True",
 			Reason:  "SecretUpToDate",
@@ -646,12 +603,6 @@ func TestConditionsOnHashChange(t *testing.T) {
 		t.Fatalf("unexpected actions on third sync: got %v", actions)
 	}
 	expectedConditionAsfterSecretChange := []metav1.Condition{
-		{
-			Type:    "SecretCreated",
-			Status:  metav1.ConditionTrue,
-			Reason:  "CreateSuccessful",
-			Message: "Secret created successfully.",
-		},
 		{
 			Type:    "SecretUpdated",
 			Status:  metav1.ConditionTrue,
