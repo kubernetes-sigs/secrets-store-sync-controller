@@ -29,7 +29,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	"golang.org/x/crypto/pbkdf2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,12 +36,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -109,13 +108,12 @@ type SecretSyncReconciler struct {
 //+kubebuilder:rbac:groups=secrets-store.csi.x-k8s.io,resources=secretproviderclasses,verbs=get;list;watch
 
 func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconciling SecretSync", "namespace", req.NamespacedName.String())
+	klog.InfoS("Reconciling SecretSync", "namespace", req.NamespacedName.String())
 
 	// get the secret sync object
 	ss := &secretsyncv1alpha1.SecretSync{}
 	if err := r.Get(ctx, req.NamespacedName, ss); err != nil {
-		logger.Error(err, "unable to fetch SecretSync")
+		klog.ErrorS(err, "unable to fetch SecretSync")
 		return ctrl.Result{}, err
 	}
 
@@ -128,7 +126,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	if len(ss.Status.Conditions) < 2 {
 		if err := r.initConditions(ctx, ss); err != nil {
-			logger.Error(err, "failed to initialize SecretSync object conditions", "namespace", ss.Namespace, "name", ss.Name)
+			klog.ErrorS(err, "failed to initialize SecretSync object conditions", "namespace", ss.Namespace, "name", ss.Name)
 			return ctrl.Result{}, err
 		}
 	}
@@ -145,12 +143,12 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// get the secret provider class object
 	spc := &secretsstorecsiv1.SecretProviderClass{}
 	if err := r.Get(ctx, client.ObjectKey{Name: ss.Spec.SecretProviderClassName, Namespace: req.Namespace}, spc); err != nil {
-		logger.Error(err, "failed to get SecretProviderClass", "name", ss.Spec.SecretProviderClassName)
+		klog.ErrorS(err, "failed to get SecretProviderClass", "name", ss.Spec.SecretProviderClassName)
 		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err), true)
 		return ctrl.Result{}, err
 	}
 
-	datamap, reason, err := r.fetchSecretsFromProvider(ctx, logger, spc, ss)
+	datamap, reason, err := r.fetchSecretsFromProvider(ctx, spc, ss)
 	if err != nil {
 		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, reason, fmt.Sprintf("fetching secrets from the provider failed: %v", err), true)
 		return ctrl.Result{}, err
@@ -159,7 +157,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	// Compute the hash of the secret
 	syncHash, err := computeCurrentStateHash(datamap, spc, ss)
 	if err != nil {
-		logger.Error(err, "failed to compute state hash", "secretName", secretName) // TODO: could this leak secrets?
+		klog.ErrorS(err, "failed to compute state hash", "secretName", secretName) // TODO: could this leak secrets?
 		r.updateStatusConditions(ctx, ss, conditionType, metav1.ConditionFalse, ConditionReasonControllerSyncError, "failed to compute state hash", true)
 		return ctrl.Result{}, err
 	}
@@ -197,7 +195,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 
 	// Attempt to create or update the secret.
 	if err = r.serverSidePatchSecret(ctx, ss, datamap); err != nil {
-		logger.Error(err, "failed to patch secret", "secretName", secretName)
+		klog.ErrorS(err, "failed to patch secret", "secretName", secretName)
 
 		// Rollback to the previous hash and the previous last successful sync time.
 		ss.Status.SyncHash = prevSecretHash
@@ -213,7 +211,7 @@ func (r *SecretSyncReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		return ctrl.Result{}, err
 	}
 
-	logger.V(4).Info("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
+	klog.V(4).InfoS("Done... updated status", "syncHash", syncHash, "lastSuccessfulSyncTime", ss.Status.LastSuccessfulSyncTime)
 	return ctrl.Result{}, nil
 }
 
@@ -233,18 +231,17 @@ func (r *SecretSyncReconciler) validateLabelsAnnotations(
 
 func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	ctx context.Context,
-	logger logr.Logger,
 	spc *secretsstorecsiv1.SecretProviderClass,
 	ss *secretsyncv1alpha1.SecretSync,
 ) (map[string][]byte, string, error) {
 	providerName := string(spc.Spec.Provider)
 	providerClient, err := r.ProviderClients.Get(ctx, providerName)
 	if err != nil {
-		logger.Error(err, "failed to get provider client", "provider", providerName)
+		klog.ErrorS(err, "failed to get provider client", "provider", providerName)
 		return nil, ConditionReasonControllerSpcError, err
 	}
 
-	paramsJSON, reason, err := r.prepareCSIProviderParams(logger, spc, ss.Namespace, ss.Spec.ServiceAccountName)
+	paramsJSON, reason, err := r.prepareCSIProviderParams(spc, ss.Namespace, ss.Spec.ServiceAccountName)
 	if err != nil {
 		return nil, reason, err
 	}
@@ -253,14 +250,14 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	var secretsJSON []byte
 	secretsJSON, err = json.Marshal(secretRefData)
 	if err != nil {
-		logger.Error(err, "failed to marshal secret")
+		klog.ErrorS(err, "failed to marshal secret")
 		return nil, ConditionReasonControllerSyncError, err
 	}
 
 	oldObjectVersions := make(map[string]string)
 	_, files, err := provider.MountContent(ctx, providerClient, string(paramsJSON), string(secretsJSON), oldObjectVersions)
 	if err != nil {
-		logger.Error(err, "failed to get secrets from provider", "provider", providerName)
+		klog.ErrorS(err, "failed to get secrets from provider", "provider", providerName)
 		return nil, ConditionReasonFailedProviderError, err
 	}
 
@@ -268,7 +265,7 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 	secretType := corev1.SecretType(secretObj.Type)
 	var datamap map[string][]byte
 	if datamap, err = secretutil.BuildKubeSecretData(secretObj.Data, secretType, files); err != nil {
-		logger.Error(err, "failed to get secret data", "secretName", ss.Name)
+		klog.ErrorS(err, "failed to get secret data", "secretName", ss.Name)
 		return nil, ConditionReasonRemoteSecretStoreFetchFailed, err
 	}
 
@@ -281,7 +278,6 @@ func (r *SecretSyncReconciler) fetchSecretsFromProvider(
 //
 // Returns JSON-serialized parameters, condition reason in case of an error, and the error itself.
 func (r *SecretSyncReconciler) prepareCSIProviderParams(
-	logger logr.Logger,
 	spc *secretsstorecsiv1.SecretProviderClass,
 	namespace,
 	saName string,
@@ -289,7 +285,7 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 	// get the service account token
 	serviceAccountTokenAttrs, err := token.SecretProviderServiceAccountTokenAttrs(r.TokenCache, namespace, saName, r.Audiences)
 	if err != nil {
-		logger.Error(err, "failed to get service account token", "name", saName)
+		klog.ErrorS(err, "failed to get service account token", "name", saName)
 
 		return nil, ConditionReasonControllerSyncError, err
 	}
@@ -306,7 +302,7 @@ func (r *SecretSyncReconciler) prepareCSIProviderParams(
 
 	paramsJSON, err := json.Marshal(parameters)
 	if err != nil {
-		logger.Error(fmt.Errorf("%T", err), "failed to marshal parameters")
+		klog.ErrorS(fmt.Errorf("%T", err), "failed to marshal parameters")
 		return nil, ConditionReasonControllerSyncError, fmt.Errorf("failed to marshal parameters: %T", err)
 	}
 
@@ -464,13 +460,12 @@ func (r *SecretSyncReconciler) providerPollingFunc(pollInterval time.Duration, i
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
 
-		logger := log.FromContext(ctx)
 		for {
 			select {
 			case <-ticker.C:
 				ssList := &secretsyncv1alpha1.SecretSyncList{}
 				if err := r.List(ctx, ssList); err != nil {
-					logger.Error(err, "failed to list SecretSyncs")
+					klog.ErrorS(err, "failed to list SecretSyncs")
 					continue
 				}
 				for idx := range ssList.Items {
@@ -487,7 +482,7 @@ func (r *SecretSyncReconciler) providerPollingFunc(pollInterval time.Duration, i
 		}
 
 	handle_context_done:
-		logger.Info("shutting down periodic resync")
+		klog.InfoS("shutting down periodic resync")
 		return nil
 	}
 }
