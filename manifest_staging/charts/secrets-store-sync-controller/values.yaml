@@ -6,7 +6,7 @@ controllerName: secrets-store-sync-controller
 tokenRequestAudience: 
   - audience:  # e.g. api://TokenAudienceExample
 
-logVerbosity: 5 
+logVerbosity: 2
 
 validatingAdmissionPolicies:
   applyPolicies: true
