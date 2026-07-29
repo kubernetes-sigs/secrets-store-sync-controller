@@ -86,6 +86,10 @@ const (
 	controllerName = "secret-sync-controller"
 )
 
+const (
+	spcToSecretSyncIndex = "MapSPCToSS" //gosec:disable G101 // this is not a hardcoded credential
+)
+
 type AllClientBuilder interface {
 	Get(ctx context.Context, provider string) (v1alpha1.CSIDriverProviderClient, error)
 }
@@ -95,6 +99,7 @@ type SecretSyncReconciler struct {
 	clients  kubernetes.Interface
 	ssClient ssclients.SecretSyncV1alpha1Interface
 
+	ssIndexer                 cache.Indexer
 	ssLister                  sslisters.SecretSyncLister
 	ssSynced                  cache.InformerSynced
 	secretProviderClassLister csilisters.SecretProviderClassLister
@@ -123,8 +128,9 @@ func NewSecretSyncReconciler(
 		clients:  kubeClient,
 		ssClient: secretSyncClient,
 
-		ssLister: secretSyncInformer.Lister(),
-		ssSynced: secretSyncInformer.Informer().HasSynced,
+		ssIndexer: secretSyncInformer.Informer().GetIndexer(),
+		ssLister:  secretSyncInformer.Lister(),
+		ssSynced:  secretSyncInformer.Informer().HasSynced,
 
 		secretProviderClassLister: secretProviderClassInformer.Lister(),
 		secretProviderClassSynced: secretProviderClassInformer.Informer().HasSynced,
@@ -141,6 +147,19 @@ func NewSecretSyncReconciler(
 			},
 		),
 		resyncRateLimiter: &workqueue.TypedBucketRateLimiter[cache.ObjectName]{Limiter: rate.NewLimiter(rate.Limit(10), 100)},
+	}
+
+	// index the secret syncs by SPC name so that we can enqueue on SPC change easily
+	if err := secretSyncInformer.Informer().AddIndexers(cache.Indexers{
+		spcToSecretSyncIndex: func(obj any) ([]string, error) {
+			ssObj, ok := obj.(*secretsyncv1alpha1.SecretSync)
+			if !ok {
+				return nil, fmt.Errorf("%T is not a *secretsyncv1alpha1.SecretSync", obj)
+			}
+			return []string{cache.NewObjectName(ssObj.Namespace, ssObj.Spec.SecretProviderClassName).String()}, nil
+		},
+	}); err != nil {
+		return nil, err
 	}
 
 	if _, err := secretSyncInformer.Informer().AddEventHandler(
@@ -164,7 +183,39 @@ func NewSecretSyncReconciler(
 		return nil, err
 	}
 
+	if _, err := secretProviderClassInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: c.enqueueSPC,
+		UpdateFunc: func(oldObj, newObj any) {
+			spcOldObj := oldObj.(*secretsstorecsiv1.SecretProviderClass)
+			spcNewObj := newObj.(*secretsstorecsiv1.SecretProviderClass)
+
+			// don't enqueue if spec didn't change
+			if spcOldObj.Generation == spcNewObj.Generation {
+				return
+			}
+			c.enqueueSPC(newObj)
+		},
+	}); err != nil {
+		return nil, err
+	}
+
 	return c, nil
+}
+
+func (r *SecretSyncReconciler) enqueueSPC(obj any) {
+	metaName, err := cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	objs, err := r.ssIndexer.ByIndex(spcToSecretSyncIndex, metaName)
+	if err != nil {
+		utilruntime.HandleError(err)
+		return
+	}
+	for _, obj := range objs {
+		r.enqueue(obj)
+	}
 }
 
 func (r *SecretSyncReconciler) enqueueAfter(obj any, after time.Duration) {
@@ -285,7 +336,10 @@ func (r *SecretSyncReconciler) sync(ctx context.Context, objRef cache.ObjectName
 	}
 
 	spc, err := r.secretProviderClassLister.SecretProviderClasses(objRef.Namespace).Get(ss.Spec.SecretProviderClassName)
-	if err != nil { // FIXME: handle not found? -> would have to be able to react to SPC changes
+	// We don't special-case NotFound so that we don't miss an Add event for SPC.
+	// A SecretSync with SPC name for an SPC that does not exist is odd anyway.
+	// We'll rely on error backoff so that we don't hotloop too bad for NotFounds here.
+	if err != nil {
 		if statusUpdateErr := r.updateStatusCondition(ctx, ss, metav1.ConditionFalse, ConditionReasonControllerSpcError, fmt.Sprintf("failed to get SecretProviderClass %q: %v", ss.Spec.SecretProviderClassName, err)); statusUpdateErr != nil {
 			logger.Error(statusUpdateErr, "failed to update SecretSync status")
 		}
