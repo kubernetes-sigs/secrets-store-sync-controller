@@ -1,0 +1,85 @@
+/*
+Copyright 2024 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"context"
+
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
+
+	secretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
+)
+
+const (
+	ConditionTypeUpdate = "SecretUpdated"
+
+	ConditionReasonFailedProviderError          = "ProviderError"
+	ConditionReasonFailedInvalidLabelError      = "InvalidClusterSecretLabelError"
+	ConditionReasonFailedInvalidAnnotationError = "InvalidClusterSecretAnnotationError"
+	ConditionReasonControllerSyncError          = "ControllerSyncError"
+	ConditionReasonControllerPatchError         = "ControllerPatchError"
+	ConditionReasonControllerSpcError           = "SecretProviderClassMisconfigured"
+	ConditionReasonRemoteSecretStoreFetchFailed = "RemoteSecretStoreFetchFailed"
+
+	ConditionReasonSyncStarting         = "SyncStarting"
+	ConditionReasonNoUpdateAttemptedYet = "NoUpdatesAttemptedYet"
+
+	ConditionReasonSecretUpToDate = "SecretUpToDate"
+
+	ConditionMessageUpdateSuccessful = "Secret contains last observed values."
+)
+
+func (r *SecretSyncReconciler) updateStatusCondition(ctx context.Context, ssCopy *secretsyncv1alpha1.SecretSync, conditionStatus metav1.ConditionStatus, conditionReason, conditionMessage string) error {
+	logger := klog.FromContext(ctx)
+
+	if ssCopy.Status.Conditions == nil {
+		ssCopy.Status.Conditions = []metav1.Condition{}
+	}
+
+	condition := metav1.Condition{
+		Type:    ConditionTypeUpdate,
+		Status:  conditionStatus,
+		Reason:  conditionReason,
+		Message: conditionMessage,
+	}
+
+	logger.V(10).Info("Adding new condition", "newConditionType", ConditionTypeUpdate, "conditionReason", conditionReason)
+	meta.SetStatusCondition(&ssCopy.Status.Conditions, condition)
+
+	if _, err := r.ssClient.SecretSyncs(ssCopy.Namespace).UpdateStatus(ctx, ssCopy, metav1.UpdateOptions{}); err != nil {
+		logger.Error(err, "Failed to update status", "condition", condition)
+		return err
+	}
+
+	return nil
+}
+
+func (r *SecretSyncReconciler) initConditions(ctx context.Context, ss *secretsyncv1alpha1.SecretSync) (*secretsyncv1alpha1.SecretSync, error) {
+	if ss.Status.Conditions == nil {
+		ss.Status.Conditions = []metav1.Condition{}
+	}
+
+	meta.SetStatusCondition(&ss.Status.Conditions, metav1.Condition{
+		Type:   ConditionTypeUpdate,
+		Status: metav1.ConditionUnknown,
+		Reason: ConditionReasonNoUpdateAttemptedYet,
+	})
+
+	return r.ssClient.SecretSyncs(ss.Namespace).UpdateStatus(ctx, ss, metav1.UpdateOptions{})
+}

@@ -22,10 +22,10 @@ SLEEP_TIME=1
 }
 
 @test "Test rbac roles and role bindings exist" {
-  run kubectl get clusterrole/secrets-store-sync-controller-manager-role
+  run kubectl get clusterrole/secrets-store-sync-controller-role
   assert_success
 
-  run kubectl get clusterrolebinding/secrets-store-sync-controller-manager-rolebinding
+  run kubectl get clusterrolebinding/secrets-store-sync-controller-rolebinding
   assert_success 
 }
 
@@ -74,8 +74,8 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-secret-sync.yaml" \
     "sse2esecret" \
-    "SecretCreated" \
-    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": SecretProviderClass.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
+    "SecretUpdated" \
+    "failed to get SecretProviderClass \\\"e2e-providerspc\\\": secretproviderclass.secrets-store.csi.x-k8s.io \\\"e2e-providerspc\\\" not found" \
     "SecretProviderClassMisconfigured" \
     "False" \
     "spc-namespace" \
@@ -89,7 +89,7 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/api_credential_secretsync.yaml" \
     "my-custom-api-secret" \
-    "SecretCreated" \
+    "SecretUpdated" \
     "failed to patch secret \\\"my-custom-api-secret\\\": secrets \\\"my-custom-api-secret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with example.com/api-credentials type in the default namespace. The controller can only create or update secrets in the allowed types list with a single secretsync owner." \
     "ControllerPatchError" \
     "False"
@@ -102,7 +102,7 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/service_account_token_secretsync.yaml" \
     "sse2eserviceaccountsecret" \
-    "SecretCreated" \
+    "SecretUpdated" \
     "failed to patch secret \\\"sse2eserviceaccountsecret\\\": secrets \\\"sse2eserviceaccountsecret\\\" is forbidden: ValidatingAdmissionPolicy 'secrets-store-sync-controller-create-update-policy' with binding 'secrets-store-sync-controller-create-update-policy-binding' denied request: secrets-store-sync-controller has failed to CREATE secret with kubernetes.io/service-account-token type in the default namespace. The controller is not allowed to create or update secrets with this type." \
     "ControllerPatchError" \
     "False"
@@ -117,7 +117,7 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/invalid_annotation_key_secretsync.yaml" \
     "sse2einvalidannotationssecret" \
-    "SecretCreated" \
+    "SecretUpdated" \
     "$expected_message" \
     "ControllerPatchError" \
     "False"
@@ -130,7 +130,7 @@ SLEEP_TIME=1
     "$BATS_RESOURCE_MANIFESTS_DIR/e2e-providerspc.yaml" \
     "$BATS_RESOURCE_YAML_DIR/invalid_label_key_secretsync.yaml" \
     "sse2einvalidlabelsecret" \
-    "SecretCreated" \
+    "SecretUpdated" \
     "$expected_message" \
     "ControllerPatchError" \
     "False"
