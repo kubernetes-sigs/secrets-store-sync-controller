@@ -36,7 +36,7 @@ KIND_NODE_IMAGE_VERSION ?= v1.32.2
 BATS_VERSION ?= 1.11.0
 SHELLCHECK_VER ?= v0.10.0
 KIND_VERSION ?= v0.27.0
-TRIVY_VERSION ?=  0.69.3
+TRIVY_VERSION ?=  0.71.1
 
 ## Tool Binaries
 KUSTOMIZE ?= $(LOCALBIN)/kustomize
@@ -231,7 +231,7 @@ image-scan: $(TRIVY)
 .PHONY: test-style
 test-style: lint lint-charts shellcheck
 
-$(GOLANGCI_LINT): ## Build golangci-lint from tools folder.
+$(GOLANGCI_LINT): $(TOOLS_MOD_DIR)/go.mod $(TOOLS_MOD_DIR)/go.sum ## Build golangci-lint from tools folder.
 	cd $(TOOLS_MOD_DIR) && \
 		GOPROXY=$(GOPROXY) go build -o $(TOOLS_BIN_DIR)/golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 

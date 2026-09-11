@@ -22,6 +22,8 @@ linters:
     - unused
     - whitespace
   settings:
+    goconst:
+      ignore-tests: true
     gocritic:
       enabled-tags:
         - performance
@@ -40,6 +42,18 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
+    rules:
+      # Credential-shaped values in tests are fixtures, not live credentials.
+      - path: ^pkg/(token/token_manager_test|util/secretutil/secret_test)\.go$
+        linters:
+          - gosec
+        text: "G101:"
+      # The comparison helper checks that both slices have equal lengths first.
+      - path: ^pkg/controller/secretsync_controller_test\.go$
+        linters:
+          - gosec
+        text: "G602:"
+        source: 'condB := b\[i\]\.DeepCopy\(\)'
     paths:
       - third_party$
       - builtin$
