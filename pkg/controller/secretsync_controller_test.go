@@ -17,7 +17,10 @@ limitations under the License.
 package controller
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -30,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	fakeclient "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
@@ -469,6 +473,196 @@ func TestReconcile(t *testing.T) {
 			ss := getSecretSyncObject(t, testSecretSyncReconciler.secretSyncReconciler, objRef)
 			if gotConditions := ss.Status.Conditions; !compareConditionsWithoutTransitionTime(gotConditions, test.expectedConditions) {
 				t.Fatalf("expected conditions %v, got %v", test.expectedConditions, gotConditions)
+			}
+		})
+	}
+}
+
+func TestServerSidePatchSecret(t *testing.T) {
+	legacyCause := metav1.StatusCause{
+		Type:    metav1.CauseTypeFieldManagerConflict,
+		Message: `conflict with "v1-secrets-store-sync-controller"`,
+		Field:   ".data.foo",
+	}
+	secondLegacyCause := legacyCause
+	secondLegacyCause.Field = ".data.bar"
+	otherManagerCause := legacyCause
+	otherManagerCause.Message = `conflict with "other-controller"`
+	currentManagerCause := legacyCause
+	currentManagerCause.Message = `conflict with "secrets-store-sync-controller"`
+	otherVersionCause := legacyCause
+	otherVersionCause.Message = `conflict with "v2-secrets-store-sync-controller"`
+	managerSuffixCause := legacyCause
+	managerSuffixCause.Message = `conflict with "v1-secrets-store-sync-controller-other"`
+	messageSuffixCause := legacyCause
+	messageSuffixCause.Message += " "
+	otherTypeCause := legacyCause
+	otherTypeCause.Type = metav1.CauseTypeFieldValueInvalid
+
+	conflict := func(causes ...metav1.StatusCause) error {
+		return apierrors.NewApplyConflict(causes, "apply conflict")
+	}
+	tests := []struct {
+		name       string
+		firstError error
+		retryError error
+		wantRetry  bool
+	}{
+		{
+			name: "successful patch is not retried",
+		},
+		{
+			name:       "non-status error is not retried",
+			firstError: errors.New(legacyCause.Message),
+		},
+		{
+			name: "non-conflict status with legacy cause is not retried",
+			firstError: &apierrors.StatusError{ErrStatus: metav1.Status{
+				Reason: metav1.StatusReasonForbidden,
+				Code:   403,
+				Details: &metav1.StatusDetails{
+					Causes: []metav1.StatusCause{legacyCause},
+				},
+			}},
+		},
+		{
+			name: "conflict without details is not retried",
+			firstError: &apierrors.StatusError{ErrStatus: metav1.Status{
+				Reason: metav1.StatusReasonConflict,
+				Code:   409,
+			}},
+		},
+		{
+			name:       "conflict with nil causes is not retried",
+			firstError: conflict(),
+		},
+		{
+			name:       "conflict with empty causes is not retried",
+			firstError: conflict([]metav1.StatusCause{}...),
+		},
+		{
+			name:       "one legacy conflict is retried",
+			firstError: conflict(legacyCause),
+			wantRetry:  true,
+		},
+		{
+			name:       "multiple legacy conflicts are retried",
+			firstError: conflict(legacyCause, secondLegacyCause),
+			wantRetry:  true,
+		},
+		{
+			name:       "wrapped legacy conflict is retried",
+			firstError: fmt.Errorf("patch failed: %w", conflict(legacyCause)),
+			wantRetry:  true,
+		},
+		{
+			name:       "other manager conflict is not retried",
+			firstError: conflict(otherManagerCause),
+		},
+		{
+			name:       "current manager conflict is not retried",
+			firstError: conflict(currentManagerCause),
+		},
+		{
+			name:       "other version conflict is not retried",
+			firstError: conflict(otherVersionCause),
+		},
+		{
+			name:       "manager name suffix is not retried",
+			firstError: conflict(managerSuffixCause),
+		},
+		{
+			name:       "non-exact message is not retried",
+			firstError: conflict(messageSuffixCause),
+		},
+		{
+			name:       "other cause type with legacy message is not retried",
+			firstError: conflict(otherTypeCause),
+		},
+		{
+			name:       "mixed managers are not retried",
+			firstError: conflict(legacyCause, otherManagerCause),
+		},
+		{
+			name:       "mixed cause types are not retried",
+			firstError: conflict(legacyCause, otherTypeCause),
+		},
+		{
+			name:       "forced patch error is returned",
+			firstError: conflict(legacyCause),
+			retryError: errors.New("forced patch failed"),
+			wantRetry:  true,
+		},
+		{
+			name:       "forced patch conflict is not retried again",
+			firstError: conflict(legacyCause),
+			retryError: conflict(legacyCause),
+			wantRetry:  true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			clients := fakeclient.NewClientset()
+			patchCalls := 0
+			clients.PrependReactor("patch", "secrets", func(_ k8stesting.Action) (bool, runtime.Object, error) {
+				patchCalls++
+				switch patchCalls {
+				case 1:
+					return true, &corev1.Secret{}, test.firstError
+				case 2:
+					return true, &corev1.Secret{}, test.retryError
+				default:
+					t.Fatal("unexpected additional patch attempt")
+					return true, nil, nil
+				}
+			})
+			r := &SecretSyncReconciler{clients: clients}
+			ss := &secretsyncv1alpha1.SecretSync{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-secret",
+					Namespace: "default",
+					UID:       "test-uid",
+				},
+				Spec: secretsyncv1alpha1.SecretSyncSpec{
+					SecretObject: secretsyncv1alpha1.SecretObject{Type: "Opaque"},
+				},
+			}
+
+			err := r.serverSidePatchSecret(t.Context(), ss, map[string][]byte{"foo": []byte("rotated-value")})
+			wantErr := test.firstError
+			wantCalls := 1
+			if test.wantRetry {
+				wantErr = test.retryError
+				wantCalls = 2
+			}
+			if !errors.Is(err, wantErr) {
+				t.Fatalf("expected error %v, got %v", wantErr, err)
+			}
+
+			actions := clients.Actions()
+			if len(actions) != wantCalls {
+				t.Fatalf("expected %d patch attempts, got %d", wantCalls, len(actions))
+			}
+			firstPatch := actions[0].(k8stesting.PatchAction).GetPatch()
+			for i, action := range actions {
+				patch := action.(k8stesting.PatchActionImpl)
+				if patch.GetNamespace() != ss.Namespace || patch.GetName() != ss.Name || patch.GetSubresource() != "" {
+					t.Fatalf("unexpected patch target: %#v", patch)
+				}
+				if patch.GetPatchType() != types.ApplyPatchType {
+					t.Fatalf("expected apply patch, got %v", patch.GetPatchType())
+				}
+				if !bytes.Equal(patch.GetPatch(), firstPatch) {
+					t.Fatal("retry changed the patch payload")
+				}
+				wantOptions := metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager}
+				if i == 1 {
+					wantOptions.Force = new(true)
+				}
+				if !reflect.DeepEqual(patch.GetPatchOptions(), wantOptions) {
+					t.Fatalf("patch %d: expected options %#v, got %#v", i+1, wantOptions, patch.GetPatchOptions())
+				}
 			}
 		})
 	}
