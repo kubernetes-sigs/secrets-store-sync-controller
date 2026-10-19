@@ -1,10 +1,6 @@
 # Update this value when you upgrade the version of your project.
 VERSION ?= $(shell cat ./VERSION | head -1)
 
-# Set the Operator SDK version to use. By default, what is installed on the system is used.
-# This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
-OPERATOR_SDK_VERSION ?= v1.30.0
-
 # go env vars
 GOARCH  := $(shell go env GOARCH)
 GOOS    := $(shell go env GOOS)
