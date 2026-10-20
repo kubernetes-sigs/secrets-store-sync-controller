@@ -23,6 +23,7 @@ import (
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
+	schema "k8s.io/apimachinery/pkg/runtime/schema"
 	watch "k8s.io/apimachinery/pkg/watch"
 	cache "k8s.io/client-go/tools/cache"
 	apisecretsyncv1alpha1 "sigs.k8s.io/secrets-store-sync-controller/api/secretsync/v1alpha1"
@@ -32,11 +33,39 @@ import (
 )
 
 // SecretSyncInformer provides access to a shared informer and lister for
-// SecretSyncs.
+// SecretSyncs. Prefer using the type-safe variant (see [TypedSecretSyncInformer]).
 type SecretSyncInformer interface {
 	Informer() cache.SharedIndexInformer
 	Lister() secretsyncv1alpha1.SecretSyncLister
 }
+
+// TypedSecretSyncInformer provides access to a shared informer and lister for
+// SecretSyncs, including the type-safe TypedInformer variant.
+// It is a superset of SecretSyncInformer.
+type TypedSecretSyncInformer interface {
+	Informer() cache.SharedIndexInformer
+	TypedInformer() SecretSyncIndexInformer
+	Lister() secretsyncv1alpha1.SecretSyncLister
+}
+
+// SecretSyncIndexInformer is a wrapper around the underlying [cache.SharedIndexInformer]
+// with type-safe variants of several methods.
+type SecretSyncIndexInformer cache.TypedSharedIndexInformer[*apisecretsyncv1alpha1.SecretSync]
+
+// SecretSyncHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerFuncs] for SecretSync.
+type SecretSyncHandlerFuncs = cache.TypedResourceEventHandlerFuncs[*apisecretsyncv1alpha1.SecretSync]
+
+// SecretSyncDetailedHandlerFuncs is a specialization of [cache.TypedResourceEventHandlerDetailedFuncs] for SecretSync.
+type SecretSyncDetailedHandlerFuncs = cache.TypedResourceEventHandlerDetailedFuncs[*apisecretsyncv1alpha1.SecretSync]
+
+// SecretSyncFilteringHandler is a specialization of [cache.TypedFilteringResourceEventHandler] for SecretSync.
+type SecretSyncFilteringHandler = cache.TypedFilteringResourceEventHandler[*apisecretsyncv1alpha1.SecretSync]
+
+// SecretSyncIndexers is a specialization of [cache.TypedIndexers] for SecretSync.
+type SecretSyncIndexers = cache.TypedIndexers[*apisecretsyncv1alpha1.SecretSync]
+
+// DeletedSecretSync is a specialization of [cache.DeletedObject] for SecretSync.
+type DeletedSecretSync = cache.DeletedObject[*apisecretsyncv1alpha1.SecretSync]
 
 type secretSyncInformer struct {
 	factory          internalinterfaces.SharedInformerFactory
@@ -47,55 +76,132 @@ type secretSyncInformer struct {
 // NewSecretSyncInformer constructs a new informer for SecretSync type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedSecretSyncInformer]).
 func NewSecretSyncInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers) cache.SharedIndexInformer {
-	return NewFilteredSecretSyncInformer(client, namespace, resyncPeriod, indexers, nil)
+	return NewSecretSyncInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers})
+}
+
+// NewTypedSecretSyncInformer constructs a new informer for SecretSync type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedSecretSyncInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers SecretSyncIndexers) SecretSyncIndexInformer {
+	return NewTypedSecretSyncInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers)})
 }
 
 // NewFilteredSecretSyncInformer constructs a new informer for SecretSync type.
 // Always prefer using an informer factory to get a shared informer instead of getting an independent
 // one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedFilteredSecretSyncInformer]).
 func NewFilteredSecretSyncInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers cache.Indexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) cache.SharedIndexInformer {
-	return cache.NewSharedIndexInformer(
-		&cache.ListWatch{
-			ListFunc: func(options v1.ListOptions) (runtime.Object, error) {
+	return NewTypedSecretSyncInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: indexers, TweakListOptions: tweakListOptions})
+}
+
+// NewTypedFilteredSecretSyncInformer constructs a new informer for SecretSync type.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedFilteredSecretSyncInformer(client versioned.Interface, namespace string, resyncPeriod time.Duration, indexers SecretSyncIndexers, tweakListOptions internalinterfaces.TweakListOptionsFunc) SecretSyncIndexInformer {
+	return NewTypedSecretSyncInformerWithOptions(client, namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.TypedIndexersToIndexers(indexers), TweakListOptions: tweakListOptions})
+}
+
+// NewSecretSyncInformerWithOptions constructs a new informer for SecretSync type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+// If you really need an independent one, prefer using the type-safe variant (see [NewTypedSecretSyncInformerWithOptions]).
+func NewSecretSyncInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) cache.SharedIndexInformer {
+	return NewTypedSecretSyncInformerWithOptions(client, namespace, options)
+}
+
+// NewTypedSecretSyncInformerWithOptions constructs a new informer for SecretSync type with additional options.
+// Always prefer using an informer factory to get a shared informer instead of getting an independent
+// one. This reduces memory footprint and number of connections to the server.
+func NewTypedSecretSyncInformerWithOptions(client versioned.Interface, namespace string, options internalinterfaces.InformerOptions) SecretSyncIndexInformer {
+	gvr := schema.GroupVersionResource{Group: "secret-sync.x-k8s.io", Version: "v1alpha1", Resource: "secretsyncs"}
+	identifier := options.InformerName.WithResource(gvr)
+	tweakListOptions := options.TweakListOptions
+	return cache.NewTypedSharedIndexInformer[*apisecretsyncv1alpha1.SecretSync](cache.NewSharedIndexInformerWithOptions(
+		cache.ToListWatcherWithWatchListSemantics(&cache.ListWatch{
+			ListFunc: func(opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.SecretSyncV1alpha1().SecretSyncs(namespace).List(context.Background(), options)
+				return client.SecretSyncV1alpha1().SecretSyncs(namespace).List(context.Background(), opts)
 			},
-			WatchFunc: func(options v1.ListOptions) (watch.Interface, error) {
+			WatchFunc: func(opts v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.SecretSyncV1alpha1().SecretSyncs(namespace).Watch(context.Background(), options)
+				return client.SecretSyncV1alpha1().SecretSyncs(namespace).Watch(context.Background(), opts)
 			},
-			ListWithContextFunc: func(ctx context.Context, options v1.ListOptions) (runtime.Object, error) {
+			ListWithContextFunc: func(ctx context.Context, opts v1.ListOptions) (runtime.Object, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.SecretSyncV1alpha1().SecretSyncs(namespace).List(ctx, options)
+				return client.SecretSyncV1alpha1().SecretSyncs(namespace).List(ctx, opts)
 			},
-			WatchFuncWithContext: func(ctx context.Context, options v1.ListOptions) (watch.Interface, error) {
+			WatchFuncWithContext: func(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
 				if tweakListOptions != nil {
-					tweakListOptions(&options)
+					tweakListOptions(&opts)
 				}
-				return client.SecretSyncV1alpha1().SecretSyncs(namespace).Watch(ctx, options)
+				return client.SecretSyncV1alpha1().SecretSyncs(namespace).Watch(ctx, opts)
 			},
-		},
+		}, client),
 		&apisecretsyncv1alpha1.SecretSync{},
-		resyncPeriod,
-		indexers,
-	)
+		cache.SharedIndexInformerOptions{
+			ResyncPeriod: options.ResyncPeriod,
+			Indexers:     options.Indexers,
+			Identifier:   identifier,
+		},
+	))
 }
 
 func (f *secretSyncInformer) defaultInformer(client versioned.Interface, resyncPeriod time.Duration) cache.SharedIndexInformer {
-	return NewFilteredSecretSyncInformer(client, f.namespace, resyncPeriod, cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, f.tweakListOptions)
+	return NewTypedSecretSyncInformerWithOptions(client, f.namespace, internalinterfaces.InformerOptions{ResyncPeriod: resyncPeriod, Indexers: cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc}, InformerName: f.factory.InformerName(), TweakListOptions: f.tweakListOptions})
 }
 
 func (f *secretSyncInformer) Informer() cache.SharedIndexInformer {
-	return f.factory.InformerFor(&apisecretsyncv1alpha1.SecretSync{}, f.defaultInformer)
+	return f.TypedInformer()
+}
+
+func (f *secretSyncInformer) TypedInformer() SecretSyncIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisecretsyncv1alpha1.SecretSync](f.factory.InformerFor(&apisecretsyncv1alpha1.SecretSync{}, f.defaultInformer))
 }
 
 func (f *secretSyncInformer) Lister() secretsyncv1alpha1.SecretSyncLister {
 	return secretsyncv1alpha1.NewSecretSyncLister(f.Informer().GetIndexer())
+}
+
+// ToTypedSecretSyncInformer converts an untyped informer into a TypedSecretSyncInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *SecretSync. If that is not the case, calling type-safe methods of the returned
+// TypedSecretSyncInformer leads to runtime panics. A safer alternative is to pass
+// around a TypedSecretSyncInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToTypedSecretSyncInformer(informer SecretSyncInformer) TypedSecretSyncInformer {
+	if informer, ok := informer.(TypedSecretSyncInformer); ok {
+		return informer
+	}
+	return &secretSyncTypedInformerAdapter{informer}
+}
+
+type secretSyncTypedInformerAdapter struct {
+	SecretSyncInformer
+}
+
+func (a *secretSyncTypedInformerAdapter) TypedInformer() SecretSyncIndexInformer {
+	return cache.NewTypedSharedIndexInformer[*apisecretsyncv1alpha1.SecretSync](a.Informer())
+}
+
+// ToSecretSyncIndexInformer converts an untyped informer into a SecretSyncIndexInformer.
+//
+// WARNING: this conversion is only safe if the informer handles objects of type
+// *SecretSync. If that is not the case, calling type-safe methods of the returned
+// SecretSyncIndexInformer leads to runtime panics. A safer alternative is to pass
+// around a SecretSyncIndexInformer instances that was obtained from a
+// SharedInformerFactory.
+func ToSecretSyncIndexInformer(informer cache.SharedIndexInformer) SecretSyncIndexInformer {
+	if informer, ok := informer.(SecretSyncIndexInformer); ok {
+		return informer
+	}
+	return cache.NewTypedSharedIndexInformer[*apisecretsyncv1alpha1.SecretSync](informer)
 }

@@ -24,7 +24,7 @@ import (
 // Interface provides access to all the informers in this group version.
 type Interface interface {
 	// SecretSyncs returns a SecretSyncInformer.
-	SecretSyncs() SecretSyncInformer
+	SecretSyncs() TypedSecretSyncInformer
 }
 
 type version struct {
@@ -38,7 +38,7 @@ func New(f internalinterfaces.SharedInformerFactory, namespace string, tweakList
 	return &version{factory: f, namespace: namespace, tweakListOptions: tweakListOptions}
 }
 
-// SecretSyncs returns a SecretSyncInformer.
-func (v *version) SecretSyncs() SecretSyncInformer {
+// SecretSyncs returns a TypedSecretSyncInformer.
+func (v *version) SecretSyncs() TypedSecretSyncInformer {
 	return &secretSyncInformer{factory: v.factory, namespace: v.namespace, tweakListOptions: v.tweakListOptions}
 }

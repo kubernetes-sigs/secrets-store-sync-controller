@@ -1,10 +1,6 @@
 # Update this value when you upgrade the version of your project.
 VERSION ?= $(shell cat ./VERSION | head -1)
 
-# Set the Operator SDK version to use. By default, what is installed on the system is used.
-# This is useful for CI or a project to utilize a specific version of the operator-sdk toolkit.
-OPERATOR_SDK_VERSION ?= v1.30.0
-
 # go env vars
 GOARCH  := $(shell go env GOARCH)
 GOOS    := $(shell go env GOOS)
@@ -32,10 +28,10 @@ LDFLAGS ?= "-X $(BUILD_TIME_VAR)=$(BUILD_TIMESTAMP) -X $(BUILD_VERSION_VAR)=$(VE
 KUSTOMIZE_VERSION ?= v4.5.7
 CONTROLLER_TOOLS_VERSION ?= v0.20.0
 K8S_CODEGEN_VERSION ?= v0.34.3
-KIND_NODE_IMAGE_VERSION ?= v1.32.2
+KIND_NODE_IMAGE_VERSION ?= v1.37.0
 BATS_VERSION ?= 1.11.0
 SHELLCHECK_VER ?= v0.10.0
-KIND_VERSION ?= v0.27.0
+KIND_VERSION ?= v0.33.0
 TRIVY_VERSION ?=  0.71.1
 
 ## Tool Binaries
