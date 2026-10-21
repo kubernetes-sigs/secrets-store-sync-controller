@@ -20,9 +20,11 @@ REPO_PATH=$(ORG_PATH)/$(PROJECT_NAME)
 # build variables
 BUILD_TIMESTAMP := $$(date +%Y-%m-%d-%H:%M)
 BUILD_TIME_VAR := $(REPO_PATH)/pkg/version.BuildTime
-BUILD_VERSION_VAR := $(REPO_PATH)/pkg/version.BuildVersion
-VCS_VAR := $(REPO_PATH)/pkg/version.Vcs
-LDFLAGS ?= "-X $(BUILD_TIME_VAR)=$(BUILD_TIMESTAMP) -X $(BUILD_VERSION_VAR)=$(VERSION) -X $(VCS_VAR)=$(BUILD_COMMIT)"
+LDFLAGS ?= "-X k8s.io/component-base/version.gitVersion=$(VERSION) \
+-X k8s.io/component-base/version.gitCommit=$(BUILD_COMMIT) \
+-X k8s.io/component-base/version.buildDate=$(BUILD_TIMESTAMP) \
+-X k8s.io/component-base/version/verflag.programName=$(PROJECT_NAME)"
+
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v4.5.7
