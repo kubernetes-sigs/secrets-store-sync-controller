@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -43,7 +44,7 @@ import (
 	"k8s.io/component-base/logs"
 	logsapi "k8s.io/component-base/logs/api/v1"
 	basemetricsreg "k8s.io/component-base/metrics/legacyregistry"
-	"k8s.io/component-base/version/verflag"
+	kversion "k8s.io/component-base/version"
 	"k8s.io/klog/v2"
 
 	sscsiv1 "sigs.k8s.io/secrets-store-csi-driver/apis/v1"
@@ -72,8 +73,14 @@ func NewSecretsStoreSyncControllerCommand() *cobra.Command {
 	controllerOpts := NewControllerOptions()
 	loggingConfig := logsapi.NewLoggingConfiguration()
 
+	version, err := json.Marshal(kversion.Get())
+	if err != nil {
+		panic(fmt.Errorf("failed to serialize version of the program: %w", err))
+	}
+
 	cmd := &cobra.Command{
-		Use: "secrets-store-sync-controller",
+		Use:     "secrets-store-sync-controller",
+		Version: string(version),
 		Long: `Runs a Kubernetes controller that syncs secrets from external secrets store to a Kubernetes secret.
 This can be useful for syncing secrets across multiple namespaces and making sure that the secrets
 are available when the secrets store goes offline.`,
@@ -86,18 +93,16 @@ are available when the secrets store goes offline.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			verflag.PrintAndExitIfRequested()
-
 			fs := cmd.Flags()
 			k8sapiflag.PrintFlags(fs)
 
 			return runMain(cmd.Context(), controllerOpts)
 		},
 	}
+	cmd.SetVersionTemplate("{{.Version}}\n")
 
 	fs := cmd.Flags()
 	controllerOpts.AddFlags(fs)
-	verflag.AddFlags(fs)
 	logsapi.AddFlags(loggingConfig, fs)
 	globalflag.AddGlobalFlags(fs, cmd.Name(), logs.SkipLoggingConfigurationFlags())
 
