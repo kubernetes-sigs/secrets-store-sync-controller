@@ -2,6 +2,17 @@ apiVersion: v1
 entries:
   secrets-store-sync-controller:
   - apiVersion: v2
+    appVersion: v0.0.6
+    created: "2026-10-23T13:46:21.541276923Z"
+    description: A Helm chart to install the Secrets Store Sync Controller and its
+      associated resources inside a Kubernetes cluster.
+    digest: 342913527868cc9f5bdda90a22a91e4b63ccb3c6b58e6e3afa3613a65dfb97e8
+    kubeVersion: '>=1.30.0-0'
+    name: secrets-store-sync-controller
+    urls:
+    - https://kubernetes-sigs.github.io/secrets-store-sync-controller/charts/secrets-store-sync-controller-0.0.6.tgz
+    version: 0.0.6
+  - apiVersion: v2
     appVersion: v0.0.5
     created: "2026-10-05T07:18:59.535958657Z"
     description: A Helm chart to install the Secrets Store Sync Controller and its
@@ -56,4 +67,4 @@ entries:
     urls:
     - https://kubernetes-sigs.github.io/secrets-store-sync-controller/charts/secrets-store-sync-controller-0.0.1.tgz
     version: 0.0.1
-generated: "2026-10-05T07:18:59.535349888Z"
+generated: "2026-10-23T13:46:21.540536405Z"
