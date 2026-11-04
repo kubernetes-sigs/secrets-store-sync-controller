@@ -21,7 +21,6 @@ import (
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -528,26 +527,6 @@ func (r *SecretSyncReconciler) serverSidePatchSecret(ctx context.Context, ssCopy
 
 	// Perform the server-side patch on the Secret.
 	_, err = r.clients.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager})
-	if !apierrors.IsConflict(err) {
-		return err
-	}
-
-	var status apierrors.APIStatus
-	if !errors.As(err, &status) {
-		return err
-	}
-	details := status.Status().Details
-	if details == nil || len(details.Causes) == 0 {
-		return err
-	}
-	for _, cause := range details.Causes {
-		if cause.Type != metav1.CauseTypeFieldManagerConflict || cause.Message != `conflict with "v1-secrets-store-sync-controller"` {
-			return err
-		}
-	}
-
-	// Transfer ownership only when all conflicts are with the controller's old field manager.
-	_, err = r.clients.CoreV1().Secrets(secretPatchData.Namespace).Patch(ctx, secretPatchData.Name, types.ApplyPatchType, patchData, metav1.PatchOptions{FieldManager: secretSyncControllerFieldManager, Force: new(true)})
 	return err
 }
 
